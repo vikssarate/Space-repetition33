@@ -29,6 +29,8 @@ h1{margin:0;font-size:18px}
 .card::after{content:"";position:absolute;left:50%;bottom:-28px;transform:translateX(-50%);width:2px;height:28px;background:var(--line)}
 .card:last-child::after{display:none}
 .pill{position:relative;width:100%;min-height:120px;border-radius:9999px;border:3px solid var(--accent);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));box-shadow:0 10px 30px rgba(0,0,0,.25);transform-style:preserve-3d;transition:transform .45s cubic-bezier(.2,.7,.2,1)}
+/* NEW: grow when a face shows images so the hint doesn't hide under media */
+.pill.tall{min-height:320px}
 .card.flipped .pill{transform:rotateY(180deg)}
 .side{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;padding:14px 22px;text-align:center;font-size:22px;font-weight:700;backface-visibility:hidden;border-radius:9999px}
 .side.back{transform:rotateY(180deg)}
@@ -250,6 +252,20 @@ function genUid(){return Date.now().toString(36)+Math.random().toString(36).slic
 function makeId(o){const k=[o.question||'',o.dateStr||'',o.place||'',o.details||''].join('|').toLowerCase();try{return btoa(unescape(encodeURIComponent(k))).replace(/=+$/,'');}catch{return k;}}
 async function compressImageToBlob(file,maxDim=1280,quality=.72){const url=URL.createObjectURL(file);const img=await new Promise((r,j)=>{const i=new Image();i.onload=()=>r(i);i.onerror=j;i.src=url;});URL.revokeObjectURL(url);const sc=Math.min(1,maxDim/Math.max(img.width,img.height));const w=Math.round(img.width*sc),h=Math.round(img.height*sc);const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');ctx.drawImage(img,0,0,w,h);return await new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',quality));}
 
+/* NEW: detect if the current face shows images and needs extra height */
+function needsTall(k, d){
+  if (k === 'image')     return toArr(d.images).length > 0;
+  if (k === 'question')  return toArr(d.qImages).length > 0;
+  if (k === 'details')   return toArr(d.dImages).length > 0;
+  if (k === 'place')     return toArr(d.pImages).length > 0;
+  if (k && k.startsWith('sec:')){
+    const i = +k.split(':')[1];
+    const s = (d.sections || [])[i] || {};
+    return toArr(s.images).length > 0;
+  }
+  return false;
+}
+
 /* ===== Normalize & storage ===== */
 function normalize(x,asLocal){
   const p=parseDDMMYYYY(x.date??x.Date??x['dd-mm-yyyy']??x.date_ddmmyyyy);
@@ -329,12 +345,33 @@ function renderCard(d){
   const card=el('button','card'); card.dataset.idx="0";
   const pill=el('div','pill'); const front=el('div','side front'); const back=el('div','side back');
   const seq=buildSeq(d); cardSeq.set(card,seq);
-  front.innerHTML=face(seq[0],d,seq); back.innerHTML=face(seq[1]??seq[0],d,seq); resolveMedia(front); resolveMedia(back); pill.append(front,back);
+  front.innerHTML=face(seq[0],d,seq);
+  back.innerHTML=face(seq[1]??seq[0],d,seq);
+  resolveMedia(front); resolveMedia(back);
+  pill.append(front,back);
+
+  /* NEW: set initial height based on the starting face */
+  pill.classList.toggle('tall', needsTall(seq[0], d));
+
   const chip=el('div','dateChip',d.dateStr||'No date'); const btnRow=el('div','btnRow');
   const ebtn=el('button','cardBtn','✎ Edit'); ebtn.onclick=(ev)=>{ev.stopPropagation(); openModal('edit',d);};
   const dbtn=el('button','cardBtn del','🗑 Delete'); dbtn.onclick=(ev)=>{ev.stopPropagation(); delCard(d);};
   btnRow.append(ebtn,dbtn); card.append(pill,chip,btnRow);
-  card.onclick=(ev)=>{ if(ev.target.tagName==='AUDIO'||ev.target.closest('.audioWrap')) return; const s=cardSeq.get(card); let i=+card.dataset.idx; const n=(i+1)%s.length, f=s[n], backSide=n%2===1; (backSide?back:front).innerHTML=face(f,d,s); resolveMedia(backSide?back:front); card.classList.toggle('flipped',backSide); card.dataset.idx=String(n); };
+
+  card.onclick=(ev)=>{
+    if(ev.target.tagName==='AUDIO'||ev.target.closest('.audioWrap')) return;
+    const s=cardSeq.get(card);
+    let i=+card.dataset.idx;
+    const n=(i+1)%s.length, f=s[n], backSide=n%2===1;
+    (backSide?back:front).innerHTML=face(f,d,s);
+    resolveMedia(backSide?back:front);
+
+    /* NEW: adjust height for the newly visible face */
+    pill.classList.toggle('tall', needsTall(f, d));
+
+    card.classList.toggle('flipped',backSide);
+    card.dataset.idx=String(n);
+  };
   timeline.appendChild(card);
 }
 
