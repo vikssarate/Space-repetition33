@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-<title>Question Cards — custom labels & section images</title>
+<title>Question Cards — custom sections</title>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <style>
 :root{--bg:#0f1220;--card:#181c2f;--ink:#eef1ff;--muted:#9aa3c7;--line:#2a3052;--accent:#6ca8ff;--ok:#7bd88f;--bad:#ff7575}
-*{box-sizing:border-box} html,body{height:100%}
+*{box-sizing:border-box}html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;-webkit-tap-highlight-color:transparent}
 header,footer{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 h1{margin:0;font-size:18px}
@@ -51,7 +51,7 @@ audio{width:100%;outline:none;border-radius:10px}
 
 /* Modal */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:10;padding:20px}
-.modalCard{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:860px;width:100%;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.modalCard{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:900px;width:100%;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
 .modal h2{margin:0 0 8px 0;font-size:18px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid>label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
@@ -63,18 +63,22 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{display:flex;align-items:center;gap:6px;background:#0b1328;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font:600 12px/1 system-ui;color:#cfd7ff}
 .chip button{border:none;background:transparent;color:#ff9a9a;cursor:pointer;font-weight:800}
+.sectionCard{grid-column:1/-1;border:1px dashed var(--line);border-radius:12px;padding:10px}
+.sectionHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.sectionHead strong{font-size:12px;color:#cfd7ff}
+.sectionHead .mini{font-size:12px}
 </style>
 </head>
 <body>
 <header>
-  <h1>Question Cards — custom labels & section images</h1>
+  <h1>Question Cards — custom sections</h1>
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <button id="addBtn" class="btn">＋ Add</button>
     <button id="exportBtn" class="btn">Export JSON</button>
     <label class="btn" style="cursor:pointer">Import JSON
       <input id="importInp" type="file" accept=".json,application/json" hidden>
     </label>
-    <span class="badge">Flow: Question → Date → Details → Place → Image → Audio</span>
+    <span class="badge">Flow: Question → Date → Details → Place → Custom Sections → Image → Audio</span>
   </div>
 </header>
 
@@ -83,7 +87,7 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
   <div id="sentinel"></div>
 </div>
 
-<footer><div class="badge">Media stored locally (IndexedDB). You can export/import anytime.</div></footer>
+<footer><div class="badge">Media saved in IndexedDB • Data in localStorage • Import/Export anytime.</div></footer>
 
 <!-- START -->
 <div id="startScreen">
@@ -114,7 +118,7 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
         <textarea id="fDetails" placeholder="1–3 lines"></textarea>
       </label>
 
-      <!-- Custom labels -->
+      <!-- Custom labels for built-ins -->
       <label>Details label (optional)
         <input id="fDetailsLabel" type="text" placeholder="Details / Notes">
       </label>
@@ -165,12 +169,21 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
         <span class="small">Use .mp3/.m4a.</span>
       </label>
 
-      <!-- Chips on edit -->
+      <!-- Chips -->
       <div style="grid-column:1/-1"><div class="small">Existing Question Images</div><div id="chipsQImg" class="chips"></div></div>
       <div style="grid-column:1/-1"><div class="small">Existing Details Images</div><div id="chipsDImg" class="chips"></div></div>
       <div style="grid-column:1/-1"><div class="small">Existing Place Images</div><div id="chipsPImg" class="chips"></div></div>
       <div style="grid-column:1/-1"><div class="small">Existing Images</div><div id="chipsImg" class="chips"></div></div>
       <div style="grid-column:1/-1"><div class="small">Existing Audio</div><div id="chipsAud" class="chips"></div></div>
+
+      <!-- ===== Custom Sections ===== -->
+      <div class="sectionCard" id="sectionsWrap">
+        <div class="sectionHead">
+          <strong>Custom sections</strong>
+          <button id="addSectionBtn" type="button" class="btn mini">＋ Add section</button>
+        </div>
+        <!-- editors injected here -->
+      </div>
     </div>
     <hr>
     <div id="modalErr" class="small" style="color:var(--bad)"></div>
@@ -179,10 +192,10 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
 </div>
 
 <script>
-/* ===== App config (change APP_NS to keep data separate) ===== */
+/* ===== App config (change APP_NS to separate datasets) ===== */
 const APP_NS   = 'appQ';
-const JSON_URL = 'cards-q.json';           // optional starter JSON (same folder)
-const CHUNK    = 12;                       // cards per batch
+const JSON_URL = 'cards-q.json';      // optional
+const CHUNK    = 12;
 const LSK      = `questioncards_${APP_NS}_user`;
 const LSKD     = `questioncards_${APP_NS}_deleted`;
 const DB_NAME  = `questioncards_media_${APP_NS}`;
@@ -206,11 +219,14 @@ const chipsQImg=document.getElementById('chipsQImg'), chipsDImg=document.getElem
 const chipsImg=document.getElementById('chipsImg'), chipsAud=document.getElementById('chipsAud');
 const cancelBtn=document.getElementById('cancelBtn'), saveBtn=document.getElementById('saveBtn');
 
+const sectionsWrap=document.getElementById('sectionsWrap'), addSectionBtn=document.getElementById('addSectionBtn');
+
 /* ===== Data ===== */
 let master=[], pool=[], io=null;
 const delSet=new Set(JSON.parse(localStorage.getItem(LSKD)||'[]'));
 const cardSeq=new WeakMap();
 let editMode=false, editingObj=null, editQImgs=[], editDImgs=[], editPImgs=[], editImgs=[], editAuds=[];
+let editSections=[]; // [{label,text,images:[]},...]
 
 /* ===== IndexedDB ===== */
 function openDB(name){return new Promise((res,rej)=>{const r=indexedDB.open(name,1);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('media'))db.createObjectStore('media',{keyPath:'id'});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error||new Error('IDB open fail'));});}
@@ -241,10 +257,17 @@ function normalize(x,asLocal){
   obj.placeLabel   = x.placeLabel   ?? x.place_label   ?? x.placeTag   ?? null;
 
   obj.qImages = x.qImages ?? x.questionImages ?? null;
-  obj.dImages = x.dImages ?? x.detailsImages ?? null; // details section images
-  obj.pImages = x.pImages ?? x.placeImages   ?? null; // place section images
-  obj.images  = x.images  ?? x.image ?? null;         // body images
+  obj.dImages = x.dImages ?? x.detailsImages ?? null;
+  obj.pImages = x.pImages ?? x.placeImages   ?? null;
+  obj.images  = x.images  ?? x.image ?? null;
   obj.audio   = x.audio   ?? x.audios ?? null;
+
+  // NEW: custom sections [{label,text,images:[...]}]
+  obj.sections = Array.isArray(x.sections) ? x.sections.map(s=>({
+    label: s.label ?? null,
+    text:  s.text  ?? null,
+    images: s.images ?? s.imgs ?? null
+  })) : null;
 
   obj._id=makeId(obj);
   if(asLocal){obj._local=true;obj._uid=genUid();}
@@ -268,7 +291,7 @@ async function init(){
   }catch(e){ loadingEl.style.display='none'; startBtn.disabled=false; errEl.textContent='Unable to start: '+e.message; }
 }
 function sort(){ master.sort((a,b)=> (a.dateTs??Infinity) - (b.dateTs??Infinity)); }
-function refill(){ pool = pool.concat(master); } // repeat after pool is exhausted
+function refill(){ pool = pool.concat(master); }
 function setupIO(){ if(io) io.disconnect(); io=new IntersectionObserver(es=>{if(es.some(e=>e.isIntersecting)) loadMore();},{root:null,rootMargin:'800px 0',threshold:0}); io.observe(sentinel); }
 function loadMore(){ if(pool.length===0) refill(); const n=Math.min(CHUNK,pool.length); pool.splice(0,n).forEach(renderCard); }
 
@@ -282,6 +305,14 @@ function buildSeq(d){
 
   if (hasDetails) seq.push('details');
   if (hasPlace)   seq.push('place');
+
+  // custom sections
+  const secs = Array.isArray(d.sections)?d.sections:[];
+  secs.forEach((s, i)=>{
+    if((s.label&&s.label.trim()) || (s.text&&s.text.trim()) || toArr(s.images).length>0){
+      seq.push('sec:'+i);
+    }
+  });
 
   if (toArr(d.images).length) seq.push('image');
   if (toArr(d.audio).length)  seq.push('audio');
@@ -305,12 +336,40 @@ function nextHint(d,seq,cur){
   const i=seq.indexOf(cur); const nxt=seq[(i+1)%seq.length];
   if(cur==='date') return 'Tap for '+(d.detailsLabel||'details');
   if(cur==='details') return 'Tap for '+(d.placeLabel||'place');
-  if(cur==='place') return 'Tap for '+(seq.includes('image')?'image':(seq.includes('audio')?'audio':'question'));
+  if(cur==='place') return 'Tap for next';
+  if(cur.startsWith('sec:')) return 'Tap for next';
   if(cur==='image') return 'Tap for '+(seq.includes('audio')?'audio':'question');
   if(cur==='audio') return 'Tap to return';
   return 'Tap for '+nxt;
 }
-
+const wrap=(inner,h)=>`<div>${inner}<div class="hint">${esc(h)}</div></div>`;
+function imgListHtml(list, alt){
+  const arr = toArr(list);
+  if (!arr.length) return '';
+  const u = String(arr[0]);
+  const more = arr.length>1 ? `<div class="mediaNote">+${arr.length-1} more image(s)</div>` : '';
+  return u.startsWith('idb:')
+    ? `<div class="mediaBox"><img class="mediaImg" data-idb="${u.slice(4)}" alt="${esc(alt)}">${more}</div>`
+    : `<div class="mediaBox"><img class="mediaImg" src="${u}" alt="${esc(alt)}">${more}</div>`;
+}
+function audHtml(d){
+  const arr=toArr(d.audio); if(!arr.length) return '';
+  return `<div class="audioWrap"><audio controls preload="none">
+    ${arr.map(u=>u.startsWith('idb:')?`<source data-idb="${u.slice(4)}">`:`<source src="${u}">`).join('')}
+  </audio></div>`;
+}
+async function resolveMedia(root){
+  for(const img of root.querySelectorAll('img[data-idb]')){
+    try{ const url=URL.createObjectURL(await idbGetBlob(DB_NAME,img.dataset.idb)); img.src=url; }catch{}
+  }
+  for(const a of root.querySelectorAll('audio')){
+    let ch=false;
+    for(const s of a.querySelectorAll('source[data-idb]')){
+      try{ const url=URL.createObjectURL(await idbGetBlob(DB_NAME,s.dataset.idb)); s.src=url; ch=true; }catch{}
+    }
+    if(ch) a.load();
+  }
+}
 function face(k,d,seq){
   if(k==='question'){
     const q = esc(d.question||'—');
@@ -343,39 +402,21 @@ function face(k,d,seq){
       nextHint(d,seq,'place')
     );
   }
+  if(k.startsWith('sec:')){
+    const i=+k.split(':')[1]; const s=(d.sections||[])[i]||{};
+    const head=esc(s.label||'Section'); const txt=esc(s.text||'—');
+    const imgs=imgListHtml(s.images, head);
+    return wrap(
+      `<div style="font-size:14px;color:#9aa3c7;font-weight:800;letter-spacing:.02em">${head}</div>
+       <div style="font-size:16px;font-weight:700;max-width:90%">${txt}</div>${imgs}`,
+      nextHint(d,seq,k)
+    );
+  }
   if(k==='image'){
     return wrap(imgListHtml(d.images, d.question || d.dateStr || 'image') || `<div class="mediaNote">No image</div>`, nextHint(d,seq,'image'));
   }
   if(k==='audio'){
     return wrap(audHtml(d) || `<div class="mediaNote">No audio</div>`, nextHint(d,seq,'audio'));
-  }
-}
-const wrap=(inner,h)=>`<div>${inner}<div class="hint">${esc(h)}</div></div>`;
-function imgListHtml(list, alt){
-  const arr = toArr(list);
-  if (!arr.length) return '';
-  const u = String(arr[0]);
-  const more = arr.length>1 ? `<div class="mediaNote">+${arr.length-1} more image(s)</div>` : '';
-  return u.startsWith('idb:')
-    ? `<div class="mediaBox"><img class="mediaImg" data-idb="${u.slice(4)}" alt="${esc(alt)}">${more}</div>`
-    : `<div class="mediaBox"><img class="mediaImg" src="${u}" alt="${esc(alt)}">${more}</div>`;
-}
-function audHtml(d){
-  const arr=toArr(d.audio); if(!arr.length) return '';
-  return `<div class="audioWrap"><audio controls preload="none">
-    ${arr.map(u=>u.startsWith('idb:')?`<source data-idb="${u.slice(4)}">`:`<source src="${u}">`).join('')}
-  </audio></div>`;
-}
-async function resolveMedia(root){
-  for(const img of root.querySelectorAll('img[data-idb]')){
-    try{ const url=URL.createObjectURL(await idbGetBlob(DB_NAME,img.dataset.idb)); img.src=url; }catch{}
-  }
-  for(const a of root.querySelectorAll('audio')){
-    let ch=false;
-    for(const s of a.querySelectorAll('source[data-idb]')){
-      try{ const url=URL.createObjectURL(await idbGetBlob(DB_NAME,s.dataset.idb)); s.src=url; ch=true; }catch{}
-    }
-    if(ch) a.load();
   }
 }
 
@@ -386,7 +427,7 @@ async function delCard(d){
     const adds=readLocalAdds();
     const ix=adds.findIndex(x=>x._uid===d._uid);
     if(ix>-1){
-      await cleanupRemoved(adds[ix],{qImages:[],dImages:[],pImages:[],images:[],audio:[]});
+      await cleanupRemoved(adds[ix],{qImages:[],dImages:[],pImages:[],images:[],audio:[],sections:[]});
       adds.splice(ix,1); saveLocalAdds(adds);
     }
   } else {
@@ -407,14 +448,19 @@ async function cleanupRemoved(prev,next){
   await doClean(prev.qImages, next.qImages);
   await doClean(prev.dImages, next.dImages);
   await doClean(prev.pImages, next.pImages);
-  await doClean(prev.images, next.images);
-  await doClean(prev.audio,  next.audio);
+  await doClean(prev.images,  next.images);
+  await doClean(prev.audio,   next.audio);
+  // custom sections
+  const prevS = (prev.sections||[]).flatMap(s=>toArr(s.images));
+  const nextS = (next.sections||[]).flatMap(s=>toArr(s.images));
+  await doClean(prevS,nextS);
 }
 
-/* Add/Edit modal */
+/* ===== Modal logic ===== */
 addBtn.onclick=()=>openModal('add');
 cancelBtn.onclick=()=>modal.style.display='none';
 modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
+
 function openModal(mode,obj=null){
   editMode=(mode==='edit'); editingObj=obj; modalTitle.textContent=editMode?'Edit card':'Add card'; modalErr.textContent='';
   if(editMode&&obj){
@@ -422,16 +468,22 @@ function openModal(mode,obj=null){
     fDetailsLabel.value=obj.detailsLabel||''; fPlaceLabel.value=obj.placeLabel||'';
     editQImgs=[...toArr(obj.qImages)]; editDImgs=[...toArr(obj.dImages)]; editPImgs=[...toArr(obj.pImages)];
     editImgs=[...toArr(obj.images)]; editAuds=[...toArr(obj.audio)];
+    editSections=Array.isArray(obj.sections)?obj.sections.map(s=>({label:s.label||'',text:s.text||'',images:[...toArr(s.images)]})):[];
   }else{
     fQuestion.value=''; fDate.value=''; fPlace.value=''; fDetails.value=''; fDetailsLabel.value=''; fPlaceLabel.value='';
-    editQImgs=[]; editDImgs=[]; editPImgs=[]; editImgs=[]; editAuds=[];
+    editQImgs=[]; editDImgs=[]; editPImgs=[]; editImgs=[]; editAuds=[]; editSections=[];
   }
-  fQImgUrls.value=''; fDImgUrls.value=''; fPImgUrls.value=''; fImgUrls.value=''; fAudUrls.value='';
-  fQImgFiles.value=''; fDImgFiles.value=''; fPImgFiles.value=''; fImgFiles.value=''; fAudFiles.value='';
+  // clear file/url inputs
+  [fQImgUrls,fDImgUrls,fPImgUrls,fImgUrls,fAudUrls].forEach(i=>i.value='');
+  [fQImgFiles,fDImgFiles,fPImgFiles,fImgFiles,fAudFiles].forEach(i=>i.value='');
+
   renderChips(chipsQImg,editQImgs,'QIMG'); renderChips(chipsDImg,editDImgs,'DIMG'); renderChips(chipsPImg,editPImgs,'PIMG');
   renderChips(chipsImg,editImgs,'IMG'); renderChips(chipsAud,editAuds,'AUD');
+
+  renderSectionsEditors();
   modal.style.display='flex'; fQuestion.focus();
 }
+
 function renderChips(c,arr,kind){
   c.innerHTML=''; if(!arr.length){c.innerHTML='<span class="small">— none —</span>';return;}
   arr.forEach((u,i)=>{const s=document.createElement('span');s.className='chip';
@@ -441,6 +493,55 @@ function renderChips(c,arr,kind){
     c.appendChild(s);
   });
 }
+
+/* Custom sections editor */
+addSectionBtn.onclick=()=>{ editSections.push({label:'',text:'',images:[]}); renderSectionsEditors(); };
+
+function renderSectionsEditors(){
+  // remove old editors
+  [...sectionsWrap.querySelectorAll('.sec-editor')].forEach(n=>n.remove());
+  if(!editSections.length){
+    const empty=el('div','mini','— no sections —'); empty.style.color='var(--muted)'; sectionsWrap.appendChild(empty);
+    return;
+  }
+  editSections.forEach((sec,idx)=>{
+    const box=document.createElement('div'); box.className='sec-editor'; box.style.marginTop='8px'; box.style.borderTop='1px dashed var(--line)'; box.style.paddingTop='8px';
+    box.dataset.idx=idx;
+
+    box.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label>Section label<input class="sLabel" type="text" placeholder="e.g., Unit" value="${esc(sec.label||'')}"></label>
+        <label>Image URLs<input class="sImgUrls" type="text" placeholder="images/x.jpg, https://…"></label>
+        <label style="grid-column:1/-1">Section text<textarea class="sText" placeholder="optional text">${esc(sec.text||'')}</textarea></label>
+        <label>Attach Images<input class="sImgFiles" type="file" accept="image/*" multiple><span class="small">Compressed & stored in IDB.</span></label>
+        <div style="grid-column:1/-1">
+          <div class="small">Existing images</div>
+          <div class="chips sChips"></div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:6px">
+        <button type="button" class="btn mini sDelBtn">Remove section</button>
+      </div>
+    `;
+
+    // chips for existing
+    const chips=box.querySelector('.sChips');
+    const rerender=()=>{ chips.innerHTML=''; if(!sec.images.length){chips.innerHTML='<span class="small">— none —</span>'; return;}
+      sec.images.forEach((u,i)=>{ const c=document.createElement('span'); c.className='chip';
+        const label=(typeof u==='string'&&u.startsWith('idb:'))?`SEC(IDB)`:(String(u).length>32?('…'+String(u).slice(-32)):String(u));
+        c.innerHTML=`<span>${label}</span><button aria-label="remove">×</button>`;
+        c.querySelector('button').onclick=()=>{sec.images.splice(i,1);rerender();};
+        chips.appendChild(c);
+      });
+    };
+    rerender();
+
+    box.querySelector('.sDelBtn').onclick=()=>{ editSections.splice(idx,1); renderSectionsEditors(); };
+    sectionsWrap.appendChild(box);
+  });
+}
+
+/* Save */
 saveBtn.onclick=async()=>{
   try{
     modalErr.textContent='';
@@ -463,6 +564,21 @@ saveBtn.onclick=async()=>{
     for(const file of [...(fImgFiles.files||[])]){ const blob=await compressImageToBlob(file); const id=await idbPutBlob(DB_NAME,'img',blob);  idbImgs.push('idb:'+id); }
     for(const file of [...(fAudFiles.files||[])]){ const id=await idbPutBlob(DB_NAME,'aud',file); idbAuds.push('idb:'+id); }
 
+    // collect custom sections from DOM editors
+    const secEditors=[...sectionsWrap.querySelectorAll('.sec-editor')];
+    const sectionsOut=[];
+    for(const ed of secEditors){
+      const idx=+ed.dataset.idx;
+      const label=(ed.querySelector('.sLabel').value||'').trim();
+      const text =(ed.querySelector('.sText').value||'').trim();
+      const urlS = splitUrls(ed.querySelector('.sImgUrls').value);
+      const files=[...(ed.querySelector('.sImgFiles').files||[])];
+      const idbS=[];
+      for(const file of files){ const blob=await compressImageToBlob(file); const id=await idbPutBlob(DB_NAME,'simg',blob); idbS.push('idb:'+id); }
+      const imgs=[...(editSections[idx]?.images||[]), ...urlS, ...idbS];
+      if(label || text || imgs.length) sectionsOut.push({label:label||null,text:text||null,images:imgs});
+    }
+
     const updated={
       question,
       dateTs:ts, dateStr:ds, year:y, month:m, day:d,
@@ -473,7 +589,8 @@ saveBtn.onclick=async()=>{
       dImages:[...editDImgs, ...urlDImgs, ...idbDImgs],
       pImages:[...editPImgs, ...urlPImgs, ...idbPImgs],
       images:[...editImgs, ...urlImgs, ...idbImgs],
-      audio:[...editAuds, ...urlAuds, ...idbAuds]
+      audio:[...editAuds, ...urlAuds, ...idbAuds],
+      sections: sectionsOut.length? sectionsOut : null
     };
     updated._id=makeId(updated);
 
@@ -501,30 +618,36 @@ exportBtn.onclick=async()=>{
   const out=[];
   for(const x of master){
     const one={
-      question:x.question,
-      date:x.dateStr,
-      detailsLabel:x.detailsLabel,
-      details:x.details,
-      placeLabel:x.placeLabel,
-      place:x.place,
-      qImages:[], detailsImages:[], placeImages:[], images:[], audio:[]
+      question:x.question,date:x.dateStr,
+      detailsLabel:x.detailsLabel,details:x.details,
+      placeLabel:x.placeLabel,place:x.place,
+      qImages:[],detailsImages:[],placeImages:[],images:[],audio:[],
+      sections:[]
     };
-    const pushMedia=async(list,kind,arrOut)=>{
+    const pushMedia=async(list,arrOut)=>{
       for(const u of toArr(list)){
         if(typeof u==='string'&&u.startsWith('idb:')) arrOut.push(await idbToDataURL(DB_NAME,u.slice(4)));
         else if(u) arrOut.push(u);
       }
     };
-    await pushMedia(x.qImages,'qimg',one.qImages);
-    await pushMedia(x.dImages,'dimg',one.detailsImages);
-    await pushMedia(x.pImages,'pimg',one.placeImages);
-    await pushMedia(x.images ,'img', one.images);
-    await pushMedia(x.audio  ,'aud', one.audio);
+    await pushMedia(x.qImages,one.qImages);
+    await pushMedia(x.dImages,one.detailsImages);
+    await pushMedia(x.pImages,one.placeImages);
+    await pushMedia(x.images,one.images);
+    await pushMedia(x.audio,one.audio);
+    // sections
+    for(const s of (x.sections||[])){
+      const ss={label:s.label,text:s.text,images:[]};
+      await pushMedia(s.images,ss.images);
+      if(!ss.images.length) delete ss.images;
+      if(ss.label||ss.text||ss.images) one.sections.push(ss);
+    }
     if(!one.qImages.length) delete one.qImages;
     if(!one.detailsImages.length) delete one.detailsImages;
     if(!one.placeImages.length) delete one.placeImages;
     if(!one.images.length) delete one.images;
     if(!one.audio.length) delete one.audio;
+    if(!one.sections.length) delete one.sections;
     out.push(one);
   }
   const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
@@ -539,10 +662,15 @@ importInp.onchange=async()=>{
       const n=normalize(raw,true);
       const fixMedia=async(list,kind)=>{const out=[]; for(const u of toArr(list)){ if(typeof u==='string'&&u.startsWith('data:')){ const b=await (await fetch(u)).blob(); const id=await idbPutBlob(DB_NAME,kind,b); out.push('idb:'+id);} else out.push(u);} return out;};
       n.qImages=await fixMedia(n.qImages,'qimg');
-      n.dImages=await fixMedia(n.dImages ?? n.detailsImages,'dimg'); // support old key
-      n.pImages=await fixMedia(n.pImages ?? n.placeImages,'pimg');   // support old key
+      n.dImages=await fixMedia(n.dImages ?? n.detailsImages,'dimg');
+      n.pImages=await fixMedia(n.pImages ?? n.placeImages,'pimg');
       n.images =await fixMedia(n.images,'img');
       n.audio  =await fixMedia(n.audio,'aud');
+      // sections
+      n.sections = Array.isArray(n.sections)? n.sections : [];
+      for(const s of n.sections){
+        s.images = await fixMedia(s.images,'simg');
+      }
       n._uid=genUid(); newOnes.push(n);
     }
     const adds=readLocalAdds(); adds.push(...newOnes); saveLocalAdds(adds);
@@ -554,7 +682,6 @@ importInp.onchange=async()=>{
 /* Rebuild */
 function rebuild(){ timeline.innerHTML=''; pool.length=0; refill(); loadMore(); }
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&modal.style.display==='flex') modal.style.display='none'; });
-
 </script>
 </body>
 </html>
