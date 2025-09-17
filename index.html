@@ -337,16 +337,31 @@ function renderCard(d){
   card.onclick=(ev)=>{ if(ev.target.tagName==='AUDIO'||ev.target.closest('.audioWrap')) return; const s=cardSeq.get(card); let i=+card.dataset.idx; const n=(i+1)%s.length, f=s[n], backSide=n%2===1; (backSide?back:front).innerHTML=face(f,d,s); resolveMedia(backSide?back:front); card.classList.toggle('flipped',backSide); card.dataset.idx=String(n); };
   timeline.appendChild(card);
 }
-function nextHint(d,seq,cur){
-  const i=seq.indexOf(cur); const nxt=seq[(i+1)%seq.length];
-  if(cur==='date') return 'Tap for '+(d.detailsLabel||'details');
-  if(cur==='details') return 'Tap for '+(d.placeLabel||'place');
-  if(cur==='place') return 'Tap for next';
-  if(cur.startsWith('sec:')) return 'Tap for next';
-  if(cur==='image') return 'Tap for '+(seq.includes('audio')?'audio':'question');
-  if(cur==='audio') return 'Tap to return';
-  return 'Tap for '+nxt;
+
+/* ==== UPDATED: context-aware hint text (uses next token’s label) ==== */
+function nextHint(d, seq, cur){
+  const i = seq.indexOf(cur);
+  const nxt = seq[(i+1) % seq.length];
+
+  const labelFor = (token) => {
+    if (token === 'question') return 'question';
+    if (token === 'date')     return 'date';
+    if (token === 'details')  return (d.detailsLabel || 'details');
+    if (token === 'place')    return (d.placeLabel   || 'place');
+    if (token === 'image')    return 'image';
+    if (token === 'audio')    return 'audio';
+    if (token && token.startsWith('sec:')){
+      const idx = +token.split(':')[1];
+      const sec = (d.sections || [])[idx] || {};
+      return (sec.label && sec.label.trim()) || 'section';
+    }
+    return 'next';
+  };
+
+  if (cur === 'audio') return 'Tap to return to question';
+  return 'Tap for ' + labelFor(nxt);
 }
+
 const wrap=(inner,h)=>`<div>${inner}<div class="hint">${esc(h)}</div></div>`;
 function imgListHtml(list, alt){
   const arr = toArr(list);
