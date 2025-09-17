@@ -50,14 +50,15 @@ h1{margin:0;font-size:18px}
 audio{width:100%;outline:none;border-radius:10px}
 
 /* Modal */
+body.modal-open{height:100%;overflow:hidden} /* lock page scroll */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:10;padding:20px}
-.modalCard{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:900px;width:100%;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.modalCard{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:900px;width:100%;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.4);max-height:calc(100vh - 40px);overflow:auto;-webkit-overflow-scrolling:touch}
 .modal h2{margin:0 0 8px 0;font-size:18px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid>label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
 input[type="text"],textarea{background:#0c1328;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
 textarea{min-height:70px;resize:vertical}
-.row{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--card);z-index:1}
 .small{font-size:12px;color:var(--muted)}
 hr{border:none;border-top:1px solid var(--line);margin:8px 0}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -180,7 +181,10 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
       <div class="sectionCard" id="sectionsWrap">
         <div class="sectionHead">
           <strong>Custom sections</strong>
-          <button id="addSectionBtn" type="button" class="btn mini">＋ Add section</button>
+          <div style="display:flex;gap:6px">
+            <button id="addSectionBtn" type="button" class="btn mini">＋ Add section</button>
+            <button id="saveTopBtn" type="button" class="btn mini">Save</button>
+          </div>
         </div>
         <!-- editors injected here -->
       </div>
@@ -220,6 +224,7 @@ const chipsImg=document.getElementById('chipsImg'), chipsAud=document.getElement
 const cancelBtn=document.getElementById('cancelBtn'), saveBtn=document.getElementById('saveBtn');
 
 const sectionsWrap=document.getElementById('sectionsWrap'), addSectionBtn=document.getElementById('addSectionBtn');
+const saveTopBtn=document.getElementById('saveTopBtn');
 
 /* ===== Data ===== */
 let master=[], pool=[], io=null;
@@ -458,8 +463,9 @@ async function cleanupRemoved(prev,next){
 
 /* ===== Modal logic ===== */
 addBtn.onclick=()=>openModal('add');
-cancelBtn.onclick=()=>modal.style.display='none';
-modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
+cancelBtn.onclick=()=>{ modal.style.display='none'; document.body.classList.remove('modal-open'); };
+modal.addEventListener('click',e=>{ if(e.target===modal){ modal.style.display='none'; document.body.classList.remove('modal-open'); }});
+if(saveTopBtn) saveTopBtn.onclick=()=>saveBtn.click();
 
 function openModal(mode,obj=null){
   editMode=(mode==='edit'); editingObj=obj; modalTitle.textContent=editMode?'Edit card':'Add card'; modalErr.textContent='';
@@ -481,7 +487,9 @@ function openModal(mode,obj=null){
   renderChips(chipsImg,editImgs,'IMG'); renderChips(chipsAud,editAuds,'AUD');
 
   renderSectionsEditors();
-  modal.style.display='flex'; fQuestion.focus();
+  modal.style.display='flex';
+  document.body.classList.add('modal-open');
+  fQuestion.focus();
 }
 
 function renderChips(c,arr,kind){
@@ -498,10 +506,10 @@ function renderChips(c,arr,kind){
 addSectionBtn.onclick=()=>{ editSections.push({label:'',text:'',images:[]}); renderSectionsEditors(); };
 
 function renderSectionsEditors(){
-  // remove old editors
-  [...sectionsWrap.querySelectorAll('.sec-editor')].forEach(n=>n.remove());
+  // remove old editors/placeholders
+  [...sectionsWrap.querySelectorAll('.sec-editor,.sec-none')].forEach(n=>n.remove());
   if(!editSections.length){
-    const empty=el('div','mini','— no sections —'); empty.style.color='var(--muted)'; sectionsWrap.appendChild(empty);
+    const empty=el('div','sec-none small','— no sections —'); empty.style.color='var(--muted)'; sectionsWrap.appendChild(empty);
     return;
   }
   editSections.forEach((sec,idx)=>{
@@ -609,7 +617,7 @@ saveBtn.onclick=async()=>{
       const newItem={_local:true,_uid:genUid(),...updated};
       const adds=readLocalAdds(); adds.push(newItem); saveLocalAdds(adds); master.push(newItem);
     }
-    sort(); rebuild(); modal.style.display='none';
+    sort(); rebuild(); modal.style.display='none'; document.body.classList.remove('modal-open');
   }catch(e){ modalErr.textContent=e.message; }
 };
 
@@ -681,7 +689,7 @@ importInp.onchange=async()=>{
 
 /* Rebuild */
 function rebuild(){ timeline.innerHTML=''; pool.length=0; refill(); loadMore(); }
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&modal.style.display==='flex') modal.style.display='none'; });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&modal.style.display==='flex'){ modal.style.display='none'; document.body.classList.remove('modal-open'); }});
 </script>
 </body>
 </html>
