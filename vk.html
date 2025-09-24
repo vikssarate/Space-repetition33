@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>Image Occlusion</title>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<style>
+:root{
+  --bg:#0f1220; --card:#181c2f; --ink:#eef1ff; --muted:#9aa3c7; --line:#2a3052; --accent:#6ca8ff;
+  --ok:#7bd88f; --warn:#ffd166; --bad:#ff7575;
+}
+*{box-sizing:border-box} html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;-webkit-tap-highlight-color:transparent}
+header,footer{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:18px}
+.wrap{max-width:1100px;margin:0 auto;padding:10px 16px 140px}
+.badge{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border:1px solid var(--line);border-radius:9999px;color:var(--muted);font-size:12px}
+.btn{appearance:none;border:1px solid var(--accent);background:#0b1430;color:var(--ink);padding:8px 12px;border-radius:12px;font-weight:700;cursor:pointer}
+.btn:active{transform:scale(.98)}
+.btn.warn{border-color:var(--warn)} .btn.bad{border-color:var(--bad)}
+.btn.toggle.active{outline:2px solid var(--accent)}
+.tabs{display:flex;gap:8px}
+.tab{padding:8px 12px;border:1px solid var(--line);border-radius:9999px;background:#0b1430;color:#dfe3ff;cursor:pointer}
+.tab.active{outline:2px solid var(--accent)}
+
+/* panels */
+.card{border:1px solid var(--line);border-radius:16px;background:var(--card);padding:12px;margin:8px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input[type="text"],input[type="url"],textarea{background:#0c1328;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+input[type="file"]{color:#cbd3ff}
+small.muted{color:var(--muted)}
+
+/* capsule cards */
+.gallery{margin-top:8px}
+.gcard{position:relative;display:block;width:min(100%,680px);margin:22px auto 30px;border:none;background:transparent}
+.pill{position:relative;width:100%;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));
+      border:3px solid var(--accent);border-radius:9999px;box-shadow:0 12px 30px rgba(0,0,0,.28);padding:18px}
+.imgWrap{position:relative;max-width:min(100%,640px);margin:0 auto}
+.imgWrap img{display:block;width:100%;height:auto;border-radius:16px;border:2px solid var(--line);background:#0a1226}
+
+/* masks (dark) */
+.mask{
+  position:absolute;border-radius:8px;
+  background:linear-gradient(135deg,rgba(10,28,80,1),rgba(10,28,80,1));
+  border:2px solid #25304f; cursor:pointer
+}
+.mask.revealed{background:transparent;border-color:transparent}
+.mask.poly{left:0;top:0;border-radius:0;width:100%;height:100%}
+
+/* card head */
+.head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.head .meta{font:600 12px/1.2 system-ui;color:var(--muted)}
+.tools{display:flex;gap:6px}
+.tools .btn{padding:6px 10px;font-weight:600}
+
+/* modal editor */
+body.modal-open{height:100%;overflow:hidden}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:20;padding:18px}
+.mcard{background:var(--card);border:1px solid var(--line);border-radius:16px;width:min(96vw,980px);max-height:92vh;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,.45);padding:14px}
+.mtop{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:6px}
+.editor{position:relative;margin:8px auto;max-width:920px}
+.editor img{display:block;max-width:100%;height:auto;border:2px solid var(--line);border-radius:12px}
+.canvas{position:absolute;inset:0;touch-action:none}
+.legend{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:6px}
+legend samp{font-weight:800}
+hr{border:none;border-top:1px solid var(--line);margin:8px 0}
+
+/* sync panel */
+.key{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.status{color:#9aa3c7;font-size:12px}
+
+/* inf scroll */
+#sentinel{height:1px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Image Occlusion</h1>
+  <div class="tabs">
+    <button class="tab active" id="tabAdd">Add</button>
+    <button class="tab" id="tabGallery">Gallery</button>
+    <button class="tab" id="tabSync">Sync</button>
+    <button class="tab" id="tabPull">Pull</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- Add Panel -->
+  <section id="panelAdd" class="card">
+    <div class="row">
+      <label style="flex:1 1 460px">Image URLs
+        <input id="addUrls" type="text" placeholder="https://…, https://…">
+      </label>
+      <label>Attach Images
+        <input id="addFiles" type="file" accept="image/*" multiple>
+        <div><small class="muted">Compressed & stored as CouchDB attachments.</small></div>
+      </label>
+      <button id="addBtn" class="btn">Add to Library</button>
+    </div>
+    <div id="addMsg" class="status" style="margin-top:6px">Ready.</div>
+  </section>
+
+  <!-- Gallery -->
+  <section id="panelGallery" class="card" style="display:none">
+    <div class="row" style="justify-content:space-between">
+      <div class="badge">Tap a mask to reveal / hide. Long-press anywhere to reset all.</div>
+      <div class="badge">Images: <span id="countBadge">0</span></div>
+    </div>
+    <div id="gallery" class="gallery"></div>
+    <div id="sentinel"></div>
+  </section>
+
+  <!-- Sync -->
+  <section id="panelSync" class="card" style="display:none">
+    <div class="row">
+      <label>Host<br><input id="couchHost" class="key" style="min-width:280px" value="https://couch.techstudy.me"></label>
+      <label>DB<br><input id="couchDb" class="key" style="min-width:160px" value="record"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="liveBtn" class="btn">Live Sync: Off</button>
+      <button id="pushBtn" class="btn">Push ⬆️</button>
+      <button id="pullBtn" class="btn">Pull ⬇️</button>
+    </div>
+    <div id="syncStatus" class="status" style="margin-top:6px">Idle.</div>
+  </section>
+
+  <!-- Pull/Restore -->
+  <section id="panelPull" class="card" style="display:none">
+    <div class="badge">Use this after clearing browser data. It rebuilds the local database from CouchDB.</div>
+    <div class="row" style="margin-top:8px">
+      <button id="restoreBtn" class="btn">Pull & Restore All</button>
+      <button id="clearLocalBtn" class="btn warn">Clear Local Only</button>
+    </div>
+    <div id="pullMsg" class="status" style="margin-top:6px"></div>
+  </section>
+</div>
+
+<footer><div class="badge">Offline-first • CouchDB attachments • Apple Pencil ready ✏️</div></footer>
+
+<!-- Editor Modal -->
+<div id="modal" class="modal" role="dialog" aria-modal="true">
+  <div class="mcard">
+    <div class="mtop">
+      <strong>Edit Masks</strong>
+      <div class="tools">
+        <button id="modeRect" class="btn toggle active" title="Rectangle mode">Rect</button>
+        <button id="modeLasso" class="btn toggle" title="Freehand polygon mode">Lasso</button>
+        <button id="mUndo" class="btn">Undo</button>
+        <button id="mClear" class="btn warn">Clear Masks</button>
+        <button id="mSave" class="btn">Save</button>
+        <button id="mCancel" class="btn bad">Close</button>
+      </div>
+    </div>
+    <div class="editor">
+      <img id="mImg" alt="for edit">
+      <canvas id="mCanvas" class="canvas"></canvas>
+    </div>
+    <div class="legend">
+      <div>Rect: drag to draw. Lasso: draw an irregular shape with Pencil/finger/mouse.</div>
+      <div>Hold <samp>⌘</samp>/<samp>Ctrl</samp> in Rect mode to snap to 8px grid.</div>
+    </div>
+  </div>
+</div>
+
+<!-- PouchDB -->
+<script src="https://cdn.jsdelivr.net/npm/pouchdb@7.3.1/dist/pouchdb.min.js"></script>
+<script>
+/* ====== Constants & helpers ====== */
+const DB_LOCAL = 'io-occl';
+const ATT_NAME = 'img';
+const CHUNK = 12;
+const IMG_PREFIX = 'img:';           // <— keyspace for gallery
+
+const $ = s => document.querySelector(s);
+const esc = s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const toArr = v => v==null?[]:(Array.isArray(v)?v:[v]);
+const fmtBytes = n => n>1e6? (n/1e6).toFixed(1)+' MB' : n>1e3? (n/1e3).toFixed(1)+' kB' : n+' B';
+const uuid = () => Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
+
+/* ====== Pouch/Couch ====== */
+let pdb = new PouchDB(DB_LOCAL);
+let live = null;
+let changesFeed = null;
+
+const couch = {
+  host: localStorage.getItem('io.host') || 'https://couch.techstudy.me',
+  db:   localStorage.getItem('io.db')   || 'record'
+};
+$('#couchHost').value = couch.host;
+$('#couchDb').value   = couch.db;
+
+function remoteURL(){ return `${(couch.host||'').replace(/\/$/,'')}/${encodeURIComponent(couch.db||'')}`; }
+function rdb(){ return new PouchDB(remoteURL(), {skip_setup:true}); }
+function setSyncStatus(t){ $('#syncStatus').textContent = t; }
+function setPullMsg(t){ $('#pullMsg').textContent = t; }
+
+/* live replicator */
+function startLive(){
+  if (live) return;
+  setSyncStatus('Starting live sync…');
+  live = PouchDB.sync(pdb, rdb(), {live:true, retry:true})
+    .on('change', () => setSyncStatus('Live: change'))
+    .on('paused', e => setSyncStatus(e ? 'Live: paused (err)' : 'Live: paused'))
+    .on('active', () => setSyncStatus('Live: active'))
+    .on('error', () => setSyncStatus('Live error (check CORS/DB)'));
+  $('#liveBtn').textContent = 'Live Sync: On';
+}
+function stopLive(){
+  if (!live) return;
+  live.cancel(); live=null;
+  setSyncStatus('Live sync stopped.');
+  $('#liveBtn').textContent = 'Live Sync: Off';
+}
+async function pushOnce(){ setSyncStatus('Pushing…'); try{ await pdb.replicate.to(rdb()); setSyncStatus('Push complete.'); }catch{ setSyncStatus('Push failed.'); } }
+async function pullOnce(){ setSyncStatus('Pulling…'); try{ await pdb.replicate.from(rdb()); setSyncStatus('Pull complete.'); }catch{ setSyncStatus('Pull failed.'); } }
+
+/* change feed (re-attach safe) */
+function attachChanges(){
+  try{ changesFeed && changesFeed.cancel(); }catch(e){}
+  changesFeed = pdb.changes({ live:true, since:'now' })
+    .on('change', () => { if (panels.gal.style.display !== 'none') resetGallery(); updateCount(); })
+    .on('error', ()=>{});
+}
+attachChanges();
+
+/* ====== Tabs ====== */
+const panels = {
+  add: $('#panelAdd'),
+  gal: $('#panelGallery'),
+  sync: $('#panelSync'),
+  pull: $('#panelPull')
+};
+function show(which){
+  $('#tabAdd').classList.toggle('active', which==='add');
+  $('#tabGallery').classList.toggle('active', which==='gal');
+  $('#tabSync').classList.toggle('active', which==='sync');
+  $('#tabPull').classList.toggle('active', which==='pull');
+  panels.add.style.display = which==='add' ? '' : 'none';
+  panels.gal.style.display = which==='gal' ? '' : 'none';
+  panels.sync.style.display= which==='sync'? '' : 'none';
+  panels.pull.style.display= which==='pull'? '' : 'none';
+}
+$('#tabAdd').onclick     = ()=>show('add');
+$('#tabGallery').onclick = ()=>{ show('gal'); if (!io) setupIO(); };
+$('#tabSync').onclick    = ()=>show('sync');
+$('#tabPull').onclick    = ()=>show('pull');
+
+/* ====== Add images ====== */
+const addUrls = $('#addUrls'), addFiles = $('#addFiles'), addBtn = $('#addBtn'), addMsg = $('#addMsg');
+
+async function blobFromURL(u){
+  const res = await fetch(u, {mode:'cors'}); if(!res.ok) throw new Error('Fetch failed');
+  return await res.blob();
+}
+function loadImageDims(blob){ return new Promise((res,rej)=>{ const url=URL.createObjectURL(blob); const img=new Image(); img.onload=()=>{res({w:img.naturalWidth,h:img.naturalHeight}); URL.revokeObjectURL(url);}; img.onerror=rej; img.src=url;});}
+async function compressToJPEG(blob, maxDim=1600, quality=.78){
+  const url = URL.createObjectURL(blob);
+  const img = await new Promise((r,j)=>{const i=new Image(); i.onload=()=>r(i); i.onerror=j; i.src=url;});
+  URL.revokeObjectURL(url);
+  const sc = Math.min(1, maxDim/Math.max(img.width,img.height));
+  const w = Math.round(img.width*sc), h = Math.round(img.height*sc);
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx = c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+  return await new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',quality));
+}
+async function addImageBlob(blob){
+  const jpeg = await compressToJPEG(blob);
+  const {w,h} = await loadImageDims(jpeg);
+  const _id = `img:${Date.now().toString(36)}:${uuid()}`;
+  const doc = {
+    _id, kind:'image', createdAt:new Date().toISOString(),
+    w, h, masks:[],
+    _attachments: { [ATT_NAME]: { content_type:'image/jpeg', data: jpeg } }
+  };
+  await pdb.put(doc);
+  return _id;
+}
+addBtn.onclick = async ()=>{
+  try{
+    addBtn.disabled=true; addMsg.textContent='Adding…';
+    const urls = (addUrls.value||'').split(',').map(x=>x.trim()).filter(Boolean);
+    let n=0, bytes=0;
+    for(const u of urls){ const b=await blobFromURL(u); bytes+=b.size; await addImageBlob(b); n++; }
+    for(const f of [...(addFiles.files||[])]){ bytes+=f.size; await addImageBlob(f); n++; }
+    addUrls.value=''; addFiles.value=''; addMsg.textContent=`Added ${n} image(s), ${fmtBytes(bytes)}.`;
+    resetGallery();
+  }catch(e){ addMsg.textContent='Failed: '+e.message; }
+  finally{ addBtn.disabled=false; }
+};
+
+/* ====== Gallery (infinite scroll restricted to img:) ====== */
+const gallery = $('#gallery'), countBadge = $('#countBadge');
+let io=null, paging=null;
+
+function setupIO(){
+  if (io) io.disconnect();
+  io = new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)) loadMore(); }, {root:null, rootMargin:'1200px 0px', threshold:0});
+  io.observe($('#sentinel'));
+}
+function resetGallery(){ paging=null; gallery.innerHTML=''; loadMore(); }
+
+async function loadMore(){
+  // page only within the img: keyspace (descending)
+  const start = paging || (IMG_PREFIX + '\uffff');
+  const r = await pdb.allDocs({
+    include_docs:true,
+    descending:true,
+    startkey:start,
+    endkey:IMG_PREFIX
+  });
+  if (!r.rows.length) return;
+  r.rows.forEach(row => { if (row.doc && row.id.startsWith(IMG_PREFIX)) renderCard(row.doc); });
+  paging = r.rows[r.rows.length-1].key;
+  updateCount();
+}
+async function updateCount(){
+  const r = await pdb.allDocs({ startkey: IMG_PREFIX, endkey: IMG_PREFIX + '\uffff' });
+  countBadge.textContent = r.rows.length;
+}
+
+/* build a capsule card for one doc */
+function renderCard(doc){
+  const card = document.createElement('div'); card.className='gcard';
+  const pill = document.createElement('div'); pill.className='pill';
+  const head = document.createElement('div'); head.className='head';
+  head.innerHTML = `<div class="meta">${new Date(doc.createdAt||Date.now()).toLocaleString()}</div>`;
+  const tools = document.createElement('div'); tools.className='tools';
+  const eBtn = document.createElement('button'); eBtn.className='btn'; eBtn.textContent='Edit';
+  const dBtn = document.createElement('button'); dBtn.className='btn bad'; dBtn.textContent='Delete';
+  tools.append(eBtn,dBtn); head.appendChild(tools);
+
+  const wrap = document.createElement('div'); wrap.className='imgWrap';
+  const img = document.createElement('img'); img.alt='image';
+  wrap.appendChild(img);
+
+  pill.append(head, wrap); card.appendChild(pill); gallery.appendChild(card);
+
+  // load attachment
+  pdb.getAttachment(doc._id, ATT_NAME).then(blob=>{
+    img.src = URL.createObjectURL(blob);
+  });
+
+  // draw masks (rect + polygon)
+  const drawMasks = ()=>{
+    [...wrap.querySelectorAll('.mask')].forEach(n=>n.remove());
+    const vw = img.clientWidth;
+    if (!vw) { requestAnimationFrame(drawMasks); return; }
+    const scale = vw / (doc.w||vw);
+
+    toArr(doc.masks).forEach((m, idx)=>{
+      if (!m) return;
+      if (m.type==='poly' && Array.isArray(m.pts) && m.pts.length>=3){
+        const d = document.createElement('div');
+        d.className = 'mask poly';
+        const pts = m.pts.map(p=>`${(p.x*scale).toFixed(1)}px ${(p.y*scale).toFixed(1)}px`).join(',');
+        d.style.clipPath = `polygon(${pts})`;
+        d.dataset.idx = idx;
+        d.addEventListener('pointerdown', ev=>{ ev.preventDefault(); d.classList.toggle('revealed'); });
+        wrap.appendChild(d);
+      } else {
+        const d = document.createElement('div');
+        d.className = 'mask';
+        d.style.left   = (m.x*scale) + 'px';
+        d.style.top    = (m.y*scale) + 'px';
+        d.style.width  = (m.w*scale) + 'px';
+        d.style.height = (m.h*scale) + 'px';
+        d.dataset.idx = idx;
+        d.addEventListener('pointerdown', ev=>{ ev.preventDefault(); d.classList.toggle('revealed'); });
+        wrap.appendChild(d);
+      }
+    });
+  };
+  img.onload = drawMasks; window.addEventListener('resize', drawMasks);
+
+  // card gestures: long-press anywhere to reset reveals
+  let t0=null;
+  pill.addEventListener('pointerdown',()=>{ t0=Date.now(); });
+  pill.addEventListener('pointerup',()=>{ if (Date.now()-t0>450) { wrap.querySelectorAll('.mask').forEach(m=>m.classList.remove('revealed')); } });
+
+  // edit/delete
+  eBtn.onclick = ()=> openEditor(doc);
+  dBtn.onclick = async ()=>{
+    if (!confirm('Delete this image?')) return;
+    const cur = await pdb.get(doc._id);
+    await pdb.remove(cur);
+    card.remove(); updateCount();
+  };
+}
+
+/* ====== Modal mask editor (Rect + Lasso) ====== */
+const modal = $('#modal'), mImg = $('#mImg'), mCanvas = $('#mCanvas');
+const mCtx = mCanvas.getContext('2d');
+let editingDoc=null, masksTmp=[], startPt=null, lastRect=null, drawMode='rect', pathPts=null;
+
+function setMode(m){
+  drawMode = m;
+  $('#modeRect').classList.toggle('active', m==='rect');
+  $('#modeLasso').classList.toggle('active', m==='poly');
+}
+$('#modeRect').onclick = ()=> setMode('rect');
+$('#modeLasso').onclick= ()=> setMode('poly');
+
+function openEditor(doc){
+  editingDoc = doc;
+  masksTmp = JSON.parse(JSON.stringify(doc.masks||[]));
+  setMode('rect');
+  document.body.classList.add('modal-open'); modal.style.display='flex';
+  pdb.getAttachment(doc._id, ATT_NAME).then(blob=>{
+    mImg.src = URL.createObjectURL(blob);
+  });
+}
+function closeEditor(){ modal.style.display='none'; document.body.classList.remove('modal-open'); startPt=null; lastRect=null; pathPts=null; }
+
+mImg.onload = ()=>{ fitCanvas(); drawEditor(); };
+window.addEventListener('resize', ()=>{ if(modal.style.display==='flex') { fitCanvas(); drawEditor(); } });
+
+function fitCanvas(){
+  const r = mImg.getBoundingClientRect();
+  const w = Math.round(r.width), h=Math.round(r.height);
+  mCanvas.width = w; mCanvas.height=h;
+  mCanvas.style.width = w+'px'; mCanvas.style.height=h+'px';
+}
+
+function drawEditor(preview){
+  mCtx.clearRect(0,0,mCanvas.width,mCanvas.height);
+  const fillCol   = 'rgba(10,28,80,1)';
+  const strokeCol = '#2840a0';
+  const scale = (mCanvas.width)/(editingDoc.w||mCanvas.width);
+
+  masksTmp.forEach(m=>{
+    if (m.type==='poly' && Array.isArray(m.pts) && m.pts.length>=3){
+      mCtx.fillStyle = fillCol; mCtx.strokeStyle = strokeCol; mCtx.lineWidth=2; mCtx.setLineDash([]);
+      mCtx.beginPath();
+      mCtx.moveTo(m.pts[0].x*scale, m.pts[0].y*scale);
+      for (let i=1;i<m.pts.length;i++) mCtx.lineTo(m.pts[i].x*scale, m.pts[i].y*scale);
+      mCtx.closePath(); mCtx.fill(); mCtx.stroke();
+    } else {
+      mCtx.fillStyle = fillCol; mCtx.strokeStyle = strokeCol; mCtx.lineWidth=2; mCtx.setLineDash([]);
+      mCtx.fillRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
+      mCtx.strokeRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
+    }
+  });
+
+  if (drawMode==='rect' && preview){
+    mCtx.setLineDash([6,6]); mCtx.strokeStyle='#7bd88f';
+    mCtx.strokeRect(preview.x, preview.y, preview.w, preview.h);
+    mCtx.setLineDash([]);
+  }
+  if (drawMode==='poly' && Array.isArray(pathPts) && pathPts.length){
+    mCtx.setLineDash([6,6]); mCtx.strokeStyle='#7bd88f'; mCtx.lineWidth=2;
+    mCtx.beginPath();
+    mCtx.moveTo(pathPts[0].x, pathPts[0].y);
+    for(let i=1;i<pathPts.length;i++) mCtx.lineTo(pathPts[i].x, pathPts[i].y);
+    mCtx.stroke(); mCtx.setLineDash([]);
+  }
+}
+
+function snap(v){ return (snapMode? Math.round(v/8)*8 : v); }
+let snapMode=false;
+
+mCanvas.addEventListener('pointerdown', (ev)=>{
+  mCanvas.setPointerCapture(ev.pointerId);
+  const rect = mCanvas.getBoundingClientRect();
+  const x = ev.clientX-rect.left, y = ev.clientY-rect.top;
+  if (drawMode==='rect'){
+    snapMode = ev.ctrlKey || ev.metaKey;
+    startPt = {x, y};
+  } else {
+    pathPts = [{x,y}];
+  }
+});
+mCanvas.addEventListener('pointermove', (ev)=>{
+  const rect = mCanvas.getBoundingClientRect();
+  const x = ev.clientX-rect.left, y = ev.clientY-rect.top;
+  if (drawMode==='rect' && startPt){
+    const xs = snap(x), ys = snap(y);
+    const x0 = snap(startPt.x), y0 = snap(startPt.y);
+    const w = xs - x0, h = ys - y0;
+    lastRect = {x: Math.min(x0,xs), y: Math.min(y0,ys), w: Math.abs(w), h: Math.abs(h)};
+    drawEditor(lastRect);
+  }
+  if (drawMode==='poly' && pathPts){
+    const last = pathPts[pathPts.length-1];
+    const dx=x-last.x, dy=y-last.y;
+    if (dx*dx+dy*dy > 9) { pathPts.push({x,y}); drawEditor(); }
+  }
+});
+function polyArea(pts){
+  let a=0; for(let i=0,j=pts.length-1;i<pts.length;j=i++) a += (pts[j].x+pts[i].x)*(pts[j].y-pts[i].y);
+  return Math.abs(a/2);
+}
+mCanvas.addEventListener('pointerup', ()=>{
+  if (drawMode==='rect'){
+    if (!lastRect || lastRect.w<8 || lastRect.h<8){ startPt=null; lastRect=null; drawEditor(); return; }
+    const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
+    masksTmp.push({ type:'rect',
+      x: Math.round(lastRect.x*sc),
+      y: Math.round(lastRect.y*sc),
+      w: Math.round(lastRect.w*sc),
+      h: Math.round(lastRect.h*sc)
+    });
+    startPt=null; lastRect=null; drawEditor();
+  } else if (drawMode==='poly'){
+    if (!pathPts || pathPts.length<3){ pathPts=null; drawEditor(); return; }
+    const first = pathPts[0], last = pathPts[pathPts.length-1];
+    const close = ((first.x-last.x)**2 + (first.y-last.y)**2) <= 144;
+    if (!close) pathPts.push({x:first.x, y:first.y});
+    const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
+    const pts = pathPts.map(p=>({x:Math.round(p.x*sc), y:Math.round(p.y*sc)}));
+    if (pts.length>=3 && polyArea(pts) >= 25){ masksTmp.push({type:'poly', pts}); }
+    pathPts=null; drawEditor();
+  }
+});
+$('#mUndo').onclick = ()=>{
+  if (pathPts && pathPts.length){ pathPts.pop(); if (!pathPts.length) pathPts=null; drawEditor(); return; }
+  masksTmp.pop(); drawEditor();
+};
+$('#mClear').onclick = ()=>{ masksTmp.length=0; pathPts=null; lastRect=null; drawEditor(); };
+$('#mCancel').onclick = ()=> closeEditor();
+$('#mSave').onclick = async ()=>{
+  try{
+    const cur = await pdb.get(editingDoc._id);
+    cur.masks = masksTmp;
+    await pdb.put(cur);
+    closeEditor();
+    resetGallery();
+  }catch(e){ alert('Save failed: '+e.message); }
+};
+
+/* ====== Sync controls ====== */
+$('#liveBtn').onclick = ()=> live ? stopLive() : startLive();
+$('#pushBtn').onclick = ()=> pushOnce();
+$('#pullBtn').onclick = async ()=>{ await pullOnce(); resetGallery(); };
+
+$('#couchHost').addEventListener('input', e=>{ couch.host=e.target.value.trim(); localStorage.setItem('io.host', couch.host); if (live){ stopLive(); startLive(); } });
+$('#couchDb').addEventListener('input',   e=>{ couch.db  =e.target.value.trim(); localStorage.setItem('io.db',   couch.db);   if (live){ stopLive(); startLive(); } });
+
+async function destroyLocal(){
+  try{ await pdb.destroy(); }catch{}
+  pdb = new PouchDB(DB_LOCAL);
+  attachChanges();            // re-attach changes feed after DB recreation
+}
+
+$('#restoreBtn').onclick = async ()=>{
+  setPullMsg('Restoring…');
+  try{
+    await destroyLocal();
+    await pullOnce();
+    resetGallery();
+    setPullMsg('Restore complete ✅');
+  }catch(e){
+    setPullMsg('Restore failed. Check host/DB/CORS.');
+  }
+};
+$('#clearLocalBtn').onclick = async ()=>{ await destroyLocal(); resetGallery(); setPullMsg('Local cleared. Now “Pull & Restore All”.'); };
+</script>
+</body>
+</html>
