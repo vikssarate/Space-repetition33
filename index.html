@@ -39,7 +39,7 @@ small.muted{color:var(--muted)}
 .imgWrap{position:relative;max-width:min(100%,640px);margin:0 auto}
 .imgWrap img{display:block;width:100%;height:auto;border-radius:16px;border:2px solid var(--line);background:#0a1226}
 
-/* masks (darker) */
+/* masks (dark) */
 .mask{
   position:absolute;border-radius:8px;
   background:linear-gradient(135deg,rgba(7,10,22,.96),rgba(7,10,22,.98));
@@ -262,7 +262,7 @@ async function addImageBlob(blob, name='image.jpg'){
   const _id = `img:${Date.now().toString(36)}:${uuid()}`;
   const doc = {
     _id, kind:'image', createdAt:new Date().toISOString(),
-    w, h, masks:[],                 // masks can be rect {type:'rect',x,y,w,h} or poly {type:'poly',pts:[{x,y}]}
+    w, h, masks:[],                 // masks: rect {type:'rect',x,y,w,h} or poly {type:'poly',pts:[{x,y}]}
     _attachments: { [ATT_NAME]: { content_type:'image/jpeg', data: jpeg } }
   };
   await putDoc(doc);
@@ -301,6 +301,10 @@ async function loadMore(){
   updateCount();
 }
 async function updateCount(){ const info = await pdb.info(); countBadge.textContent = info.doc_count; }
+
+/* listen to DB changes to refresh gallery when visible */
+pdb.changes({live:true, since:'now', include_docs:true})
+  .on('change', () => { if (panels.gal.style.display !== 'none') resetGallery(); updateCount(); });
 
 /* build a capsule card for one doc */
 function renderCard(doc){
@@ -472,12 +476,19 @@ mCanvas.addEventListener('pointermove', (ev)=>{
     drawEditor(lastRect);
   }
   if (drawMode==='poly' && pathPts){
-    // add point if moved enough (3px)
+    // add a point if moved > 3px
     const last = pathPts[pathPts.length-1];
     const dx=x-last.x, dy=y-last.y;
     if (dx*dx+dy*dy > 9) { pathPts.push({x,y}); drawEditor(); }
   }
 });
+
+/* --- COMPLETE: finalize rect or polygon on pointerup --- */
+function polyArea(pts){ // image-space pts
+  let a=0; for(let i=0,j=pts.length-1;i<pts.length;j=i++) a += (pts[j].x+pts[i].x)*(pts[j].y-pts[i].y);
+  return Math.abs(a/2);
+}
+
 mCanvas.addEventListener('pointerup', ()=>{
   if (drawMode==='rect'){
     if (!lastRect || lastRect.w<8 || lastRect.h<8){ startPt=null; lastRect=null; drawEditor(); return; }
@@ -491,4 +502,63 @@ mCanvas.addEventListener('pointerup', ()=>{
     });
     startPt=null; lastRect=null; drawEditor();
   } else if (drawMode==='poly'){
-    if (!path
+    if (!pathPts || pathPts.length<3){ pathPts=null; drawEditor(); return; }
+    // close polygon (snap if near start)
+    const first = pathPts[0], last = pathPts[pathPts.length-1];
+    const close = ((first.x-last.x)**2 + (first.y-last.y)**2) <= 144; // 12px
+    if (!close) pathPts.push({x:first.x, y:first.y});
+    // scale to image-space
+    const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
+    const pts = pathPts.map(p=>({x:Math.round(p.x*sc), y:Math.round(p.y*sc)}));
+    if (pts.length>=3 && polyArea(pts) >= 25){ // ignore tiny shapes
+      masksTmp.push({type:'poly', pts});
+    }
+    pathPts=null; drawEditor();
+  }
+});
+
+/* editor buttons */
+$('#mUndo').onclick = ()=>{
+  if (pathPts && pathPts.length){ pathPts.pop(); if (!pathPts.length) pathPts=null; drawEditor(); return; }
+  masksTmp.pop(); drawEditor();
+};
+$('#mClear').onclick = ()=>{ masksTmp.length=0; pathPts=null; lastRect=null; drawEditor(); };
+$('#mCancel').onclick = ()=> closeEditor();
+$('#mSave').onclick = async ()=>{
+  try{
+    const cur = await pdb.get(editingDoc._id);
+    cur.masks = masksTmp;
+    await pdb.put(cur);
+    closeEditor();
+    resetGallery(); // reflect changes
+  }catch(e){
+    alert('Save failed: '+e.message);
+  }
+};
+
+/* ====== Sync controls ====== */
+$('#liveBtn').onclick = ()=> live ? stopLive() : startLive();
+$('#pushBtn').onclick = ()=> pushOnce();
+$('#pullBtn').onclick = async ()=>{ await pullOnce(); resetGallery(); };
+
+$('#couchHost').addEventListener('input', e=>{ couch.host=e.target.value.trim(); localStorage.setItem('io.host', couch.host); if (live){ stopLive(); startLive(); } });
+$('#couchDb').addEventListener('input',   e=>{ couch.db  =e.target.value.trim(); localStorage.setItem('io.db',   couch.db);   if (live){ stopLive(); startLive(); } });
+
+async function destroyLocal(){ try{ await pdb.destroy(); }catch{} pdb = new PouchDB(DB_LOCAL); }
+
+$('#restoreBtn').onclick = async ()=>{
+  setPullMsg('Restoring…');
+  try{
+    await destroyLocal();
+    await pullOnce();
+    resetGallery();
+    setPullMsg('Restore complete ✅');
+  }catch(e){
+    setPullMsg('Restore failed. Check host/DB/CORS.');
+  }
+};
+$('#clearLocalBtn').onclick = async ()=>{ await destroyLocal(); resetGallery(); setPullMsg('Local cleared. Now “Pull & Restore All”.'); };
+
+</script>
+</body>
+</html>
