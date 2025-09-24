@@ -42,7 +42,7 @@ small.muted{color:var(--muted)}
 /* masks (dark) */
 .mask{
   position:absolute;border-radius:8px;
-  background:linear-gradient(135deg,rgba(7,10,22,.96),rgba(7,10,22,.98));
+  background:linear-gradient(135deg,rgba(10,28,80,1),rgba(10,28,80,1));
   border:2px solid #25304f; cursor:pointer
 }
 .mask.revealed{background:transparent;border-color:transparent}
@@ -424,8 +424,8 @@ function fitCanvas(){
 
 function drawEditor(preview){
   mCtx.clearRect(0,0,mCanvas.width,mCanvas.height);
-  const fillCol   = 'rgba(7,10,22,.92)';
-  const strokeCol = '#2b375c';
+  const fillCol   = 'rgba(10,28,80,1)';
+  const strokeCol = '#2840a0';
   const scale = (mCanvas.width)/(editingDoc.w||mCanvas.width);
 
   masksTmp.forEach(m=>{
