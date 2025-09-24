@@ -39,11 +39,11 @@ small.muted{color:var(--muted)}
 .imgWrap{position:relative;max-width:min(100%,640px);margin:0 auto}
 .imgWrap img{display:block;width:100%;height:auto;border-radius:16px;border:2px solid var(--line);background:#0a1226}
 
-/* masks (dark) */
+/* masks (opaque dark blue) */
 .mask{
   position:absolute;border-radius:8px;
   background:linear-gradient(135deg,rgba(10,28,80,1),rgba(10,28,80,1));
-  border:2px solid #25304f; cursor:pointer
+  border:2px solid #2840a0; cursor:pointer
 }
 .mask.revealed{background:transparent;border-color:transparent}
 .mask.poly{left:0;top:0;border-radius:0;width:100%;height:100%}
@@ -118,11 +118,11 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
       <label>DB<br><input id="couchDb" class="key" style="min-width:160px" value="record"></label>
     </div>
     <div class="row" style="margin-top:8px">
-      <button id="liveBtn" class="btn">Live Sync: Off</button>
+      <button id="liveBtn" class="btn">Live Sync: On</button>
       <button id="pushBtn" class="btn">Push ⬆️</button>
       <button id="pullBtn" class="btn">Pull ⬇️</button>
     </div>
-    <div id="syncStatus" class="status" style="margin-top:6px">Idle.</div>
+    <div id="syncStatus" class="status" style="margin-top:6px">Auto live sync running…</div>
   </section>
 
   <!-- Pull/Restore -->
@@ -170,10 +170,9 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
 const DB_LOCAL = 'io-occl';
 const ATT_NAME = 'img';
 const CHUNK = 12;
-const IMG_PREFIX = 'img:';           // <— keyspace for gallery
+const IMG_PREFIX = 'img:';  // keyspace for gallery
 
 const $ = s => document.querySelector(s);
-const esc = s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const toArr = v => v==null?[]:(Array.isArray(v)?v:[v]);
 const fmtBytes = n => n>1e6? (n/1e6).toFixed(1)+' MB' : n>1e3? (n/1e3).toFixed(1)+' kB' : n+' B';
 const uuid = () => Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
@@ -195,7 +194,7 @@ function rdb(){ return new PouchDB(remoteURL(), {skip_setup:true}); }
 function setSyncStatus(t){ $('#syncStatus').textContent = t; }
 function setPullMsg(t){ $('#pullMsg').textContent = t; }
 
-/* live replicator */
+/* ---- Live sync: auto start & auto restart ---- */
 function startLive(){
   if (live) return;
   setSyncStatus('Starting live sync…');
@@ -215,7 +214,11 @@ function stopLive(){
 async function pushOnce(){ setSyncStatus('Pushing…'); try{ await pdb.replicate.to(rdb()); setSyncStatus('Push complete.'); }catch{ setSyncStatus('Push failed.'); } }
 async function pullOnce(){ setSyncStatus('Pulling…'); try{ await pdb.replicate.from(rdb()); setSyncStatus('Pull complete.'); }catch{ setSyncStatus('Pull failed.'); } }
 
-/* change feed (re-attach safe) */
+/* Kick an immediate push after any local write */
+let kickT=null;
+function kickSync(){ clearTimeout(kickT); kickT=setTimeout(()=>{ pushOnce().catch(()=>{}); }, 150); }
+
+/* Change feed to refresh UI */
 function attachChanges(){
   try{ changesFeed && changesFeed.cancel(); }catch(e){}
   changesFeed = pdb.changes({ live:true, since:'now' })
@@ -223,6 +226,20 @@ function attachChanges(){
     .on('error', ()=>{});
 }
 attachChanges();
+
+/* Auto start live + initial pull on fresh devices */
+(async function bootSync(){
+  startLive();
+  try{
+    const info = await pdb.info();
+    if ((info.doc_count||0) === 0){
+      setSyncStatus('No local data → pulling from CouchDB…');
+      await pullOnce();
+      setSyncStatus('Initial pull complete.');
+      resetGallery();
+    }
+  }catch{}
+})();
 
 /* ====== Tabs ====== */
 const panels = {
@@ -246,6 +263,63 @@ $('#tabGallery').onclick = ()=>{ show('gal'); if (!io) setupIO(); };
 $('#tabSync').onclick    = ()=>show('sync');
 $('#tabPull').onclick    = ()=>show('pull');
 
+/* ====== Robust image pipeline ====== */
+function dataURLtoBlob(dataURL){
+  const parts = dataURL.split(','), b64 = parts[1];
+  const bin = atob(b64); const len = bin.length; const u8 = new Uint8Array(len);
+  for (let i=0;i<len;i++) u8[i]=bin.charCodeAt(i);
+  const mime = (parts[0].match(/data:(.*?);/)||[])[1]||'application/octet-stream';
+  return new Blob([u8], {type:mime});
+}
+function canvasToBlobSafe(canvas, type='image/jpeg', quality=.78){
+  return new Promise(res=>{
+    if (canvas.toBlob){
+      canvas.toBlob(b=>{ res(b || dataURLtoBlob(canvas.toDataURL(type,quality))); }, type, quality);
+    } else {
+      res(dataURLtoBlob(canvas.toDataURL(type,quality)));
+    }
+  });
+}
+
+/* compress blob → {blob,w,h}; fall back to original on failure/unsupported types */
+async function compressToJPEG(blob, maxDim=1600, quality=.78){
+  try{
+    let bmp;
+    if ('createImageBitmap' in window){
+      bmp = await createImageBitmap(blob);
+      const sc = Math.min(1, maxDim/Math.max(bmp.width, bmp.height));
+      const w = Math.round(bmp.width*sc), h = Math.round(bmp.height*sc);
+      const c = document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx = c.getContext('2d'); ctx.drawImage(bmp,0,0,w,h);
+      const out = await canvasToBlobSafe(c,'image/jpeg',quality);
+      try{ bmp.close && bmp.close(); }catch{}
+      return {blob:out, w, h};
+    }else{
+      const url = URL.createObjectURL(blob);
+      const img = await new Promise((r,j)=>{ const i=new Image(); i.onload=()=>r(i); i.onerror=j; i.src=url; });
+      URL.revokeObjectURL(url);
+      const sc = Math.min(1, maxDim/Math.max(img.naturalWidth||img.width, img.naturalHeight||img.height));
+      const w = Math.round((img.naturalWidth||img.width)*sc), h = Math.round((img.naturalHeight||img.height)*sc);
+      const c = document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx = c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+      const out = await canvasToBlobSafe(c,'image/jpeg',quality);
+      return {blob:out, w, h};
+    }
+  }catch(e){
+    // fallback: keep original
+    // try to estimate dims (may be unknown for non-image types)
+    const url = URL.createObjectURL(blob);
+    try{
+      const img = await new Promise((r,j)=>{ const i=new Image(); i.onload=()=>r(i); i.onerror=j; i.src=url; });
+      URL.revokeObjectURL(url);
+      return {blob, w: img.naturalWidth||0, h: img.naturalHeight||0};
+    }catch{
+      URL.revokeObjectURL(url);
+      return {blob, w: 0, h: 0};
+    }
+  }
+}
+
 /* ====== Add images ====== */
 const addUrls = $('#addUrls'), addFiles = $('#addFiles'), addBtn = $('#addBtn'), addMsg = $('#addMsg');
 
@@ -253,27 +327,16 @@ async function blobFromURL(u){
   const res = await fetch(u, {mode:'cors'}); if(!res.ok) throw new Error('Fetch failed');
   return await res.blob();
 }
-function loadImageDims(blob){ return new Promise((res,rej)=>{ const url=URL.createObjectURL(blob); const img=new Image(); img.onload=()=>{res({w:img.naturalWidth,h:img.naturalHeight}); URL.revokeObjectURL(url);}; img.onerror=rej; img.src=url;});}
-async function compressToJPEG(blob, maxDim=1600, quality=.78){
-  const url = URL.createObjectURL(blob);
-  const img = await new Promise((r,j)=>{const i=new Image(); i.onload=()=>r(i); i.onerror=j; i.src=url;});
-  URL.revokeObjectURL(url);
-  const sc = Math.min(1, maxDim/Math.max(img.width,img.height));
-  const w = Math.round(img.width*sc), h = Math.round(img.height*sc);
-  const c = document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx = c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
-  return await new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',quality));
-}
-async function addImageBlob(blob){
-  const jpeg = await compressToJPEG(blob);
-  const {w,h} = await loadImageDims(jpeg);
+async function addImageBlob(originalBlob){
+  // Try to compress to jpeg; fallback to original (HEIC etc.)
+  const {blob:jpeg, w, h} = await compressToJPEG(originalBlob);
   const _id = `img:${Date.now().toString(36)}:${uuid()}`;
   const doc = {
     _id, kind:'image', createdAt:new Date().toISOString(),
     w, h, masks:[],
-    _attachments: { [ATT_NAME]: { content_type:'image/jpeg', data: jpeg } }
+    _attachments: { [ATT_NAME]: { content_type: (jpeg.type||'image/jpeg'), data: jpeg } }
   };
-  await pdb.put(doc);
+  await pdb.put(doc); kickSync();
   return _id;
 }
 addBtn.onclick = async ()=>{
@@ -281,12 +344,21 @@ addBtn.onclick = async ()=>{
     addBtn.disabled=true; addMsg.textContent='Adding…';
     const urls = (addUrls.value||'').split(',').map(x=>x.trim()).filter(Boolean);
     let n=0, bytes=0;
-    for(const u of urls){ const b=await blobFromURL(u); bytes+=b.size; await addImageBlob(b); n++; }
+
+    for(const u of urls){
+      try{ const b=await blobFromURL(u); bytes+=b.size; await addImageBlob(b); n++; }
+      catch(e){ console.warn('URL add failed',u,e); }
+    }
     for(const f of [...(addFiles.files||[])]){ bytes+=f.size; await addImageBlob(f); n++; }
-    addUrls.value=''; addFiles.value=''; addMsg.textContent=`Added ${n} image(s), ${fmtBytes(bytes)}.`;
+
+    addUrls.value=''; addFiles.value='';
+    addMsg.textContent=`Added ${n} image(s), ${fmtBytes(bytes)}.`;
     resetGallery();
-  }catch(e){ addMsg.textContent='Failed: '+e.message; }
-  finally{ addBtn.disabled=false; }
+  }catch(e){
+    addMsg.textContent='Failed: '+e.message;
+  }finally{
+    addBtn.disabled=false;
+  }
 };
 
 /* ====== Gallery (infinite scroll restricted to img:) ====== */
@@ -301,13 +373,9 @@ function setupIO(){
 function resetGallery(){ paging=null; gallery.innerHTML=''; loadMore(); }
 
 async function loadMore(){
-  // page only within the img: keyspace (descending)
   const start = paging || (IMG_PREFIX + '\uffff');
   const r = await pdb.allDocs({
-    include_docs:true,
-    descending:true,
-    startkey:start,
-    endkey:IMG_PREFIX
+    include_docs:true, descending:true, startkey:start, endkey:IMG_PREFIX, limit: CHUNK
   });
   if (!r.rows.length) return;
   r.rows.forEach(row => { if (row.doc && row.id.startsWith(IMG_PREFIX)) renderCard(row.doc); });
@@ -341,7 +409,7 @@ function renderCard(doc){
     img.src = URL.createObjectURL(blob);
   });
 
-  // draw masks (rect + polygon)
+  // draw masks
   const drawMasks = ()=>{
     [...wrap.querySelectorAll('.mask')].forEach(n=>n.remove());
     const vw = img.clientWidth;
@@ -373,7 +441,7 @@ function renderCard(doc){
   };
   img.onload = drawMasks; window.addEventListener('resize', drawMasks);
 
-  // card gestures: long-press anywhere to reset reveals
+  // long-press anywhere to reset reveals
   let t0=null;
   pill.addEventListener('pointerdown',()=>{ t0=Date.now(); });
   pill.addEventListener('pointerup',()=>{ if (Date.now()-t0>450) { wrap.querySelectorAll('.mask').forEach(m=>m.classList.remove('revealed')); } });
@@ -383,7 +451,7 @@ function renderCard(doc){
   dBtn.onclick = async ()=>{
     if (!confirm('Delete this image?')) return;
     const cur = await pdb.get(doc._id);
-    await pdb.remove(cur);
+    await pdb.remove(cur); kickSync();
     card.remove(); updateCount();
   };
 }
@@ -424,7 +492,7 @@ function fitCanvas(){
 
 function drawEditor(preview){
   mCtx.clearRect(0,0,mCanvas.width,mCanvas.height);
-  const fillCol   = 'rgba(10,28,80,1)';
+  const fillCol   = 'rgba(10,28,80,1)'; // opaque dark blue
   const strokeCol = '#2840a0';
   const scale = (mCanvas.width)/(editingDoc.w||mCanvas.width);
 
@@ -486,10 +554,12 @@ mCanvas.addEventListener('pointermove', (ev)=>{
     if (dx*dx+dy*dy > 9) { pathPts.push({x,y}); drawEditor(); }
   }
 });
+
 function polyArea(pts){
   let a=0; for(let i=0,j=pts.length-1;i<pts.length;j=i++) a += (pts[j].x+pts[i].x)*(pts[j].y-pts[i].y);
   return Math.abs(a/2);
 }
+
 mCanvas.addEventListener('pointerup', ()=>{
   if (drawMode==='rect'){
     if (!lastRect || lastRect.w<8 || lastRect.h<8){ startPt=null; lastRect=null; drawEditor(); return; }
@@ -512,6 +582,8 @@ mCanvas.addEventListener('pointerup', ()=>{
     pathPts=null; drawEditor();
   }
 });
+
+/* editor buttons */
 $('#mUndo').onclick = ()=>{
   if (pathPts && pathPts.length){ pathPts.pop(); if (!pathPts.length) pathPts=null; drawEditor(); return; }
   masksTmp.pop(); drawEditor();
@@ -522,7 +594,7 @@ $('#mSave').onclick = async ()=>{
   try{
     const cur = await pdb.get(editingDoc._id);
     cur.masks = masksTmp;
-    await pdb.put(cur);
+    await pdb.put(cur); kickSync();
     closeEditor();
     resetGallery();
   }catch(e){ alert('Save failed: '+e.message); }
@@ -533,13 +605,20 @@ $('#liveBtn').onclick = ()=> live ? stopLive() : startLive();
 $('#pushBtn').onclick = ()=> pushOnce();
 $('#pullBtn').onclick = async ()=>{ await pullOnce(); resetGallery(); };
 
-$('#couchHost').addEventListener('input', e=>{ couch.host=e.target.value.trim(); localStorage.setItem('io.host', couch.host); if (live){ stopLive(); startLive(); } });
-$('#couchDb').addEventListener('input',   e=>{ couch.db  =e.target.value.trim(); localStorage.setItem('io.db',   couch.db);   if (live){ stopLive(); startLive(); } });
+$('#couchHost').addEventListener('input', e=>{
+  couch.host=e.target.value.trim(); localStorage.setItem('io.host', couch.host);
+  if (live){ stopLive(); startLive(); }
+});
+$('#couchDb').addEventListener('input', e=>{
+  couch.db=e.target.value.trim(); localStorage.setItem('io.db', couch.db);
+  if (live){ stopLive(); startLive(); }
+});
 
 async function destroyLocal(){
-  try{ await pdb.destroy(); }catch{}
+  try{ if (live) stopLive(); await pdb.destroy(); }catch{}
   pdb = new PouchDB(DB_LOCAL);
-  attachChanges();            // re-attach changes feed after DB recreation
+  attachChanges();
+  startLive();
 }
 
 $('#restoreBtn').onclick = async ()=>{
@@ -553,7 +632,19 @@ $('#restoreBtn').onclick = async ()=>{
     setPullMsg('Restore failed. Check host/DB/CORS.');
   }
 };
-$('#clearLocalBtn').onclick = async ()=>{ await destroyLocal(); resetGallery(); setPullMsg('Local cleared. Now “Pull & Restore All”.'); };
+$('#clearLocalBtn').onclick = async ()=>{
+  await destroyLocal();
+  resetGallery();
+  setPullMsg('Local cleared. Now “Pull & Restore All”.');
+};
+
+/* ====== Infinite scroll bootstrap ====== */
+let io=null;
+function setupIO(){
+  if (io) io.disconnect();
+  io = new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)) loadMore(); }, {root:null, rootMargin:'1200px 0', threshold:0});
+  io.observe(document.getElementById('sentinel'));
+}
 </script>
 </body>
 </html>
