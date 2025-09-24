@@ -19,6 +19,7 @@ h1{margin:0;font-size:18px}
 .btn{appearance:none;border:1px solid var(--accent);background:#0b1430;color:var(--ink);padding:8px 12px;border-radius:12px;font-weight:700;cursor:pointer}
 .btn:active{transform:scale(.98)}
 .btn.warn{border-color:var(--warn)} .btn.bad{border-color:var(--bad)}
+.btn.toggle.active{outline:2px solid var(--accent)}
 .tabs{display:flex;gap:8px}
 .tab{padding:8px 12px;border:1px solid var(--line);border-radius:9999px;background:#0b1430;color:#dfe3ff;cursor:pointer}
 .tab.active{outline:2px solid var(--accent)}
@@ -38,10 +39,15 @@ small.muted{color:var(--muted)}
 .imgWrap{position:relative;max-width:min(100%,640px);margin:0 auto}
 .imgWrap img{display:block;width:100%;height:auto;border-radius:16px;border:2px solid var(--line);background:#0a1226}
 
-/* masks */
-.mask{position:absolute;border-radius:8px;background:linear-gradient(135deg,rgba(7,10,22,.96),rgba(7,10,22,.98));
-      border:2px solid #25304f; cursor:pointer}
+/* masks (darker) */
+.mask{
+  position:absolute;border-radius:8px;
+  background:linear-gradient(135deg,rgba(7,10,22,.96),rgba(7,10,22,.98));
+  border:2px solid #25304f; cursor:pointer
+}
 .mask.revealed{background:transparent;border-color:transparent}
+/* polygon masks are full-size overlays clipped to polygon */
+.mask.poly{left:0;top:0;border-radius:0;width:100%;height:100%}
 
 /* card head */
 .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
@@ -139,6 +145,8 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
     <div class="mtop">
       <strong>Edit Masks</strong>
       <div class="tools">
+        <button id="modeRect" class="btn toggle active" title="Rectangle mode">Rect</button>
+        <button id="modeLasso" class="btn toggle" title="Freehand polygon mode">Lasso</button>
         <button id="mUndo" class="btn">Undo</button>
         <button id="mClear" class="btn warn">Clear Masks</button>
         <button id="mSave" class="btn">Save</button>
@@ -150,8 +158,8 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
       <canvas id="mCanvas" class="canvas"></canvas>
     </div>
     <div class="legend">
-      <div>Draw rectangles with finger/Apple Pencil/mouse.</div>
-      <div>Tip: Hold <samp>⌘</samp>/<samp>Ctrl</samp> while dragging to snap to 8px grid.</div>
+      <div>Rect: drag to draw. Lasso: draw an irregular shape with Pencil/finger/mouse.</div>
+      <div>Hold <samp>⌘</samp>/<samp>Ctrl</samp> in Rect mode to snap to 8px grid.</div>
     </div>
   </div>
 </div>
@@ -254,7 +262,7 @@ async function addImageBlob(blob, name='image.jpg'){
   const _id = `img:${Date.now().toString(36)}:${uuid()}`;
   const doc = {
     _id, kind:'image', createdAt:new Date().toISOString(),
-    w, h, masks:[],
+    w, h, masks:[],                 // masks can be rect {type:'rect',x,y,w,h} or poly {type:'poly',pts:[{x,y}]}
     _attachments: { [ATT_NAME]: { content_type:'image/jpeg', data: jpeg } }
   };
   await putDoc(doc);
@@ -268,7 +276,6 @@ addBtn.onclick = async ()=>{
     for(const u of urls){ const b=await blobFromURL(u); bytes+=b.size; await addImageBlob(b); n++; }
     for(const f of [...(addFiles.files||[])]){ bytes+=f.size; await addImageBlob(f); n++; }
     addUrls.value=''; addFiles.value=''; addMsg.textContent=`Added ${n} image(s), ${fmtBytes(bytes)}.`;
-    // cause gallery to refresh
     resetGallery();
   }catch(e){ addMsg.textContent='Failed: '+e.message; }
   finally{ addBtn.disabled=false; }
@@ -317,23 +324,36 @@ function renderCard(doc){
     img.src = URL.createObjectURL(blob);
   });
 
-  // draw masks
+  // draw masks (rect + polygon)
   const drawMasks = ()=>{
     [...wrap.querySelectorAll('.mask')].forEach(n=>n.remove());
-    const {clientWidth:vw} = img; if (!vw) { requestAnimationFrame(drawMasks); return; }
+    const vw = img.clientWidth, vh = img.clientHeight;
+    if (!vw || !vh) { requestAnimationFrame(drawMasks); return; }
     const scale = vw / (doc.w||vw);
+
     toArr(doc.masks).forEach((m, idx)=>{
-      const d = document.createElement('div');
-      d.className = 'mask';
-      d.style.left = (m.x*scale) + 'px';
-      d.style.top  = (m.y*scale) + 'px';
-      d.style.width  = (m.w*scale) + 'px';
-      d.style.height = (m.h*scale) + 'px';
-      d.dataset.idx = idx;
-      d.addEventListener('pointerdown', (ev)=>{
-        ev.preventDefault(); d.classList.toggle('revealed');
-      });
-      wrap.appendChild(d);
+      if (!m) return;
+      if (m.type==='poly' && Array.isArray(m.pts) && m.pts.length>=3){
+        // full overlay clipped to polygon
+        const d = document.createElement('div');
+        d.className = 'mask poly';
+        const pts = m.pts.map(p=>`${(p.x*scale).toFixed(1)}px ${(p.y*scale).toFixed(1)}px`).join(',');
+        d.style.clipPath = `polygon(${pts})`;
+        d.dataset.idx = idx;
+        d.addEventListener('pointerdown', ev=>{ ev.preventDefault(); d.classList.toggle('revealed'); });
+        wrap.appendChild(d);
+      } else {
+        // treat as rect (back-compat if m.type missing)
+        const d = document.createElement('div');
+        d.className = 'mask';
+        d.style.left   = (m.x*scale) + 'px';
+        d.style.top    = (m.y*scale) + 'px';
+        d.style.width  = (m.w*scale) + 'px';
+        d.style.height = (m.h*scale) + 'px';
+        d.dataset.idx = idx;
+        d.addEventListener('pointerdown', ev=>{ ev.preventDefault(); d.classList.toggle('revealed'); });
+        wrap.appendChild(d);
+      }
     });
   };
   img.onload = drawMasks; window.addEventListener('resize', drawMasks);
@@ -353,21 +373,30 @@ function renderCard(doc){
   };
 }
 
-/* ====== Modal mask editor (Apple Pencil / pen / touch / mouse) ====== */
+/* ====== Modal mask editor (Rect + Lasso) ====== */
 const modal = $('#modal'), mImg = $('#mImg'), mCanvas = $('#mCanvas');
 const mCtx = mCanvas.getContext('2d');
-let editingDoc=null, masksTmp=[], startPt=null, lastRect=null;
+let editingDoc=null, masksTmp=[], startPt=null, lastRect=null, drawMode='rect', pathPts=null;
+
+function setMode(m){
+  drawMode = m;
+  $('#modeRect').classList.toggle('active', m==='rect');
+  $('#modeLasso').classList.toggle('active', m==='poly');
+}
+$('#modeRect').onclick = ()=> setMode('rect');
+$('#modeLasso').onclick= ()=> setMode('poly');
 
 function openEditor(doc){
   editingDoc = doc;
   masksTmp = JSON.parse(JSON.stringify(doc.masks||[]));
+  setMode('rect');
   document.body.classList.add('modal-open'); modal.style.display='flex';
   // load image
   pdb.getAttachment(doc._id, ATT_NAME).then(blob=>{
     mImg.src = URL.createObjectURL(blob);
   });
 }
-function closeEditor(){ modal.style.display='none'; document.body.classList.remove('modal-open'); startPt=null; lastRect=null; }
+function closeEditor(){ modal.style.display='none'; document.body.classList.remove('modal-open'); startPt=null; lastRect=null; pathPts=null; }
 
 mImg.onload = ()=>{ fitCanvas(); drawEditor(); };
 window.addEventListener('resize', ()=>{ if(modal.style.display==='flex') { fitCanvas(); drawEditor(); } });
@@ -380,95 +409,86 @@ function fitCanvas(){
 }
 
 function drawEditor(preview){
-  // draw existing masks
   mCtx.clearRect(0,0,mCanvas.width,mCanvas.height);
-  mCtx.fillStyle='rgba(7,10,22,.92)';
-  mCtx.strokeStyle='#2b375c'; mCtx.lineWidth=2; mCtx.setLineDash([]);
+  // darker overlay stroke/fill
+  const fillCol   = 'rgba(7,10,22,.92)';
+  const strokeCol = '#2b375c';
+
   const scale = (mCanvas.width)/(editingDoc.w||mCanvas.width);
+
+  // existing masks
   masksTmp.forEach(m=>{
-    mCtx.fillRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
-    mCtx.strokeRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
+    if (m.type==='poly' && Array.isArray(m.pts) && m.pts.length>=3){
+      mCtx.fillStyle = fillCol; mCtx.strokeStyle = strokeCol; mCtx.lineWidth=2; mCtx.setLineDash([]);
+      mCtx.beginPath();
+      mCtx.moveTo(m.pts[0].x*scale, m.pts[0].y*scale);
+      for (let i=1;i<m.pts.length;i++) mCtx.lineTo(m.pts[i].x*scale, m.pts[i].y*scale);
+      mCtx.closePath(); mCtx.fill(); mCtx.stroke();
+    } else {
+      mCtx.fillStyle = fillCol; mCtx.strokeStyle = strokeCol; mCtx.lineWidth=2; mCtx.setLineDash([]);
+      mCtx.fillRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
+      mCtx.strokeRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
+    }
   });
 
-  if (preview){
-    mCtx.setLineDash([6,6]);
-    mCtx.strokeStyle='#7bd88f';
+  // previews
+  if (drawMode==='rect' && preview){
+    mCtx.setLineDash([6,6]); mCtx.strokeStyle='#7bd88f';
     mCtx.strokeRect(preview.x, preview.y, preview.w, preview.h);
     mCtx.setLineDash([]);
+  }
+  if (drawMode==='poly' && Array.isArray(pathPts) && pathPts.length){
+    mCtx.setLineDash([6,6]); mCtx.strokeStyle='#7bd88f'; mCtx.lineWidth=2;
+    mCtx.beginPath();
+    mCtx.moveTo(pathPts[0].x, pathPts[0].y);
+    for(let i=1;i<pathPts.length;i++) mCtx.lineTo(pathPts[i].x, pathPts[i].y);
+    mCtx.stroke(); mCtx.setLineDash([]);
   }
 }
 
 function snap(v){ return (snapMode? Math.round(v/8)*8 : v); }
 let snapMode=false;
 
+/* pointer handling for both modes */
 mCanvas.addEventListener('pointerdown', (ev)=>{
   mCanvas.setPointerCapture(ev.pointerId);
-  snapMode = ev.ctrlKey || ev.metaKey;
   const rect = mCanvas.getBoundingClientRect();
-  startPt = {x: ev.clientX-rect.left, y: ev.clientY-rect.top};
+  const x = ev.clientX-rect.left, y = ev.clientY-rect.top;
+  if (drawMode==='rect'){
+    snapMode = ev.ctrlKey || ev.metaKey;
+    startPt = {x, y};
+  } else { // poly
+    pathPts = [{x,y}];
+  }
 });
 mCanvas.addEventListener('pointermove', (ev)=>{
-  if (!startPt) return;
   const rect = mCanvas.getBoundingClientRect();
-  const x = snap(ev.clientX-rect.left), y = snap(ev.clientY-rect.top);
-  const x0 = snap(startPt.x), y0 = snap(startPt.y);
-  const w = x - x0, h = y - y0;
-  lastRect = {x: Math.min(x0,x), y: Math.min(y0,y), w: Math.abs(w), h: Math.abs(h)};
-  drawEditor(lastRect);
+  const x = ev.clientX-rect.left, y = ev.clientY-rect.top;
+  if (drawMode==='rect' && startPt){
+    const xs = snap(x), ys = snap(y);
+    const x0 = snap(startPt.x), y0 = snap(startPt.y);
+    const w = xs - x0, h = ys - y0;
+    lastRect = {x: Math.min(x0,xs), y: Math.min(y0,ys), w: Math.abs(w), h: Math.abs(h)};
+    drawEditor(lastRect);
+  }
+  if (drawMode==='poly' && pathPts){
+    // add point if moved enough (3px)
+    const last = pathPts[pathPts.length-1];
+    const dx=x-last.x, dy=y-last.y;
+    if (dx*dx+dy*dy > 9) { pathPts.push({x,y}); drawEditor(); }
+  }
 });
 mCanvas.addEventListener('pointerup', ()=>{
-  if (!lastRect || lastRect.w<8 || lastRect.h<8){ startPt=null; lastRect=null; drawEditor(); return; }
-  // push normalized rect
-  const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
-  masksTmp.push({
-    x: Math.round(lastRect.x*sc),
-    y: Math.round(lastRect.y*sc),
-    w: Math.round(lastRect.w*sc),
-    h: Math.round(lastRect.h*sc)
-  });
-  startPt=null; lastRect=null; drawEditor();
-});
-
-/* editor buttons */
-$('#mUndo').onclick = ()=>{ masksTmp.pop(); drawEditor(); };
-$('#mClear').onclick = ()=>{ if(confirm('Clear all masks?')) { masksTmp.length=0; drawEditor(); } };
-$('#mCancel').onclick= ()=> closeEditor();
-$('#mSave').onclick  = async ()=>{
-  try{
-    const cur = await pdb.get(editingDoc._id);
-    cur.masks = masksTmp;
-    await pdb.put(cur); // live sync will push instantly
-    closeEditor();
-    resetGallery(); // refresh rendering so masks show
-  }catch(e){ alert('Save failed: '+e.message); }
-};
-
-/* ====== Sync panel wiring ====== */
-$('#liveBtn').onclick = ()=> live ? stopLive() : startLive();
-$('#pushBtn').onclick = ()=> pushOnce();
-$('#pullBtn').onclick = ()=> pullOnce();
-
-$('#couchHost').addEventListener('input', ()=>{ couch.host=$('#couchHost').value.trim(); localStorage.setItem('io.host', couch.host); if(live) { stopLive(); startLive(); } });
-$('#couchDb').addEventListener('input',   ()=>{ couch.db=$('#couchDb').value.trim();     localStorage.setItem('io.db',   couch.db);   if(live) { stopLive(); startLive(); } });
-
-/* ====== Pull/restore ====== */
-$('#restoreBtn').onclick = async ()=>{
-  setPullMsg('Restoring… (pulling from remote)'); try{
-    await pullOnce(); setPullMsg('Pulled.'); resetGallery();
-  }catch{ setPullMsg('Restore failed.'); }
-};
-$('#clearLocalBtn').onclick = async ()=>{
-  await pdb.destroy(); pdb = new PouchDB(DB_LOCAL); setPullMsg('Local cleared. Use “Pull & Restore All”.'); resetGallery();
-};
-
-/* ====== Real-time UI updates when docs change ====== */
-pdb.changes({live:true, since:'now', include_docs:true})
-  .on('change', (c)=>{ if (c.doc && c.id.startsWith('img:')) { /* you could diff and patch; simplest: refresh counts */ updateCount(); } })
-  .on('error', ()=>{});
-
-/* ====== Boot ====== */
-show('add'); // start on Add
-resetGallery(); // draw if there are existing docs
-</script>
-</body>
-</html>
+  if (drawMode==='rect'){
+    if (!lastRect || lastRect.w<8 || lastRect.h<8){ startPt=null; lastRect=null; drawEditor(); return; }
+    const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
+    masksTmp.push({
+      type:'rect',
+      x: Math.round(lastRect.x*sc),
+      y: Math.round(lastRect.y*sc),
+      w: Math.round(lastRect.w*sc),
+      h: Math.round(lastRect.h*sc)
+    });
+    startPt=null; lastRect=null; drawEditor();
+  } else if (drawMode==='poly'){
+    if (!path
