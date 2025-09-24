@@ -46,7 +46,6 @@ small.muted{color:var(--muted)}
   border:2px solid #25304f; cursor:pointer
 }
 .mask.revealed{background:transparent;border-color:transparent}
-/* polygon masks are full-size overlays clipped to polygon */
 .mask.poly{left:0;top:0;border-radius:0;width:100%;height:100%}
 
 /* card head */
@@ -171,6 +170,7 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
 const DB_LOCAL = 'io-occl';
 const ATT_NAME = 'img';
 const CHUNK = 12;
+const IMG_PREFIX = 'img:';           // <— keyspace for gallery
 
 const $ = s => document.querySelector(s);
 const esc = s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -181,6 +181,8 @@ const uuid = () => Date.now().toString(36)+'-'+Math.random().toString(36).slice(
 /* ====== Pouch/Couch ====== */
 let pdb = new PouchDB(DB_LOCAL);
 let live = null;
+let changesFeed = null;
+
 const couch = {
   host: localStorage.getItem('io.host') || 'https://couch.techstudy.me',
   db:   localStorage.getItem('io.db')   || 'record'
@@ -201,7 +203,7 @@ function startLive(){
     .on('change', () => setSyncStatus('Live: change'))
     .on('paused', e => setSyncStatus(e ? 'Live: paused (err)' : 'Live: paused'))
     .on('active', () => setSyncStatus('Live: active'))
-    .on('error', e => setSyncStatus('Live error (check CORS/DB)'));
+    .on('error', () => setSyncStatus('Live error (check CORS/DB)'));
   $('#liveBtn').textContent = 'Live Sync: On';
 }
 function stopLive(){
@@ -213,8 +215,14 @@ function stopLive(){
 async function pushOnce(){ setSyncStatus('Pushing…'); try{ await pdb.replicate.to(rdb()); setSyncStatus('Push complete.'); }catch{ setSyncStatus('Push failed.'); } }
 async function pullOnce(){ setSyncStatus('Pulling…'); try{ await pdb.replicate.from(rdb()); setSyncStatus('Pull complete.'); }catch{ setSyncStatus('Pull failed.'); } }
 
-/* write helper that also triggers background save for live sync */
-async function putDoc(doc){ return await pdb.put(doc); }
+/* change feed (re-attach safe) */
+function attachChanges(){
+  try{ changesFeed && changesFeed.cancel(); }catch(e){}
+  changesFeed = pdb.changes({ live:true, since:'now' })
+    .on('change', () => { if (panels.gal.style.display !== 'none') resetGallery(); updateCount(); })
+    .on('error', ()=>{});
+}
+attachChanges();
 
 /* ====== Tabs ====== */
 const panels = {
@@ -256,16 +264,16 @@ async function compressToJPEG(blob, maxDim=1600, quality=.78){
   const ctx = c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
   return await new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',quality));
 }
-async function addImageBlob(blob, name='image.jpg'){
+async function addImageBlob(blob){
   const jpeg = await compressToJPEG(blob);
   const {w,h} = await loadImageDims(jpeg);
   const _id = `img:${Date.now().toString(36)}:${uuid()}`;
   const doc = {
     _id, kind:'image', createdAt:new Date().toISOString(),
-    w, h, masks:[],                 // masks: rect {type:'rect',x,y,w,h} or poly {type:'poly',pts:[{x,y}]}
+    w, h, masks:[],
     _attachments: { [ATT_NAME]: { content_type:'image/jpeg', data: jpeg } }
   };
-  await putDoc(doc);
+  await pdb.put(doc);
   return _id;
 }
 addBtn.onclick = async ()=>{
@@ -281,7 +289,7 @@ addBtn.onclick = async ()=>{
   finally{ addBtn.disabled=false; }
 };
 
-/* ====== Gallery (infinite scroll) ====== */
+/* ====== Gallery (infinite scroll restricted to img:) ====== */
 const gallery = $('#gallery'), countBadge = $('#countBadge');
 let io=null, paging=null;
 
@@ -293,18 +301,23 @@ function setupIO(){
 function resetGallery(){ paging=null; gallery.innerHTML=''; loadMore(); }
 
 async function loadMore(){
-  const opts = paging ? {descending:true, limit:CHUNK, startkey:paging} : {descending:true, limit:CHUNK};
-  const r = await pdb.allDocs({...opts, include_docs:true, startkey: opts.startkey});
+  // page only within the img: keyspace (descending)
+  const start = paging || (IMG_PREFIX + '\uffff');
+  const r = await pdb.allDocs({
+    include_docs:true,
+    descending:true,
+    startkey:start,
+    endkey:IMG_PREFIX
+  });
   if (!r.rows.length) return;
-  r.rows.forEach(row => { if (row.doc && row.id.startsWith('img:')) renderCard(row.doc); });
+  r.rows.forEach(row => { if (row.doc && row.id.startsWith(IMG_PREFIX)) renderCard(row.doc); });
   paging = r.rows[r.rows.length-1].key;
   updateCount();
 }
-async function updateCount(){ const info = await pdb.info(); countBadge.textContent = info.doc_count; }
-
-/* listen to DB changes to refresh gallery when visible */
-pdb.changes({live:true, since:'now', include_docs:true})
-  .on('change', () => { if (panels.gal.style.display !== 'none') resetGallery(); updateCount(); });
+async function updateCount(){
+  const r = await pdb.allDocs({ startkey: IMG_PREFIX, endkey: IMG_PREFIX + '\uffff' });
+  countBadge.textContent = r.rows.length;
+}
 
 /* build a capsule card for one doc */
 function renderCard(doc){
@@ -331,14 +344,13 @@ function renderCard(doc){
   // draw masks (rect + polygon)
   const drawMasks = ()=>{
     [...wrap.querySelectorAll('.mask')].forEach(n=>n.remove());
-    const vw = img.clientWidth, vh = img.clientHeight;
-    if (!vw || !vh) { requestAnimationFrame(drawMasks); return; }
+    const vw = img.clientWidth;
+    if (!vw) { requestAnimationFrame(drawMasks); return; }
     const scale = vw / (doc.w||vw);
 
     toArr(doc.masks).forEach((m, idx)=>{
       if (!m) return;
       if (m.type==='poly' && Array.isArray(m.pts) && m.pts.length>=3){
-        // full overlay clipped to polygon
         const d = document.createElement('div');
         d.className = 'mask poly';
         const pts = m.pts.map(p=>`${(p.x*scale).toFixed(1)}px ${(p.y*scale).toFixed(1)}px`).join(',');
@@ -347,7 +359,6 @@ function renderCard(doc){
         d.addEventListener('pointerdown', ev=>{ ev.preventDefault(); d.classList.toggle('revealed'); });
         wrap.appendChild(d);
       } else {
-        // treat as rect (back-compat if m.type missing)
         const d = document.createElement('div');
         d.className = 'mask';
         d.style.left   = (m.x*scale) + 'px';
@@ -395,7 +406,6 @@ function openEditor(doc){
   masksTmp = JSON.parse(JSON.stringify(doc.masks||[]));
   setMode('rect');
   document.body.classList.add('modal-open'); modal.style.display='flex';
-  // load image
   pdb.getAttachment(doc._id, ATT_NAME).then(blob=>{
     mImg.src = URL.createObjectURL(blob);
   });
@@ -414,13 +424,10 @@ function fitCanvas(){
 
 function drawEditor(preview){
   mCtx.clearRect(0,0,mCanvas.width,mCanvas.height);
-  // darker overlay stroke/fill
   const fillCol   = 'rgba(7,10,22,.92)';
   const strokeCol = '#2b375c';
-
   const scale = (mCanvas.width)/(editingDoc.w||mCanvas.width);
 
-  // existing masks
   masksTmp.forEach(m=>{
     if (m.type==='poly' && Array.isArray(m.pts) && m.pts.length>=3){
       mCtx.fillStyle = fillCol; mCtx.strokeStyle = strokeCol; mCtx.lineWidth=2; mCtx.setLineDash([]);
@@ -435,7 +442,6 @@ function drawEditor(preview){
     }
   });
 
-  // previews
   if (drawMode==='rect' && preview){
     mCtx.setLineDash([6,6]); mCtx.strokeStyle='#7bd88f';
     mCtx.strokeRect(preview.x, preview.y, preview.w, preview.h);
@@ -453,7 +459,6 @@ function drawEditor(preview){
 function snap(v){ return (snapMode? Math.round(v/8)*8 : v); }
 let snapMode=false;
 
-/* pointer handling for both modes */
 mCanvas.addEventListener('pointerdown', (ev)=>{
   mCanvas.setPointerCapture(ev.pointerId);
   const rect = mCanvas.getBoundingClientRect();
@@ -461,7 +466,7 @@ mCanvas.addEventListener('pointerdown', (ev)=>{
   if (drawMode==='rect'){
     snapMode = ev.ctrlKey || ev.metaKey;
     startPt = {x, y};
-  } else { // poly
+  } else {
     pathPts = [{x,y}];
   }
 });
@@ -476,25 +481,20 @@ mCanvas.addEventListener('pointermove', (ev)=>{
     drawEditor(lastRect);
   }
   if (drawMode==='poly' && pathPts){
-    // add a point if moved > 3px
     const last = pathPts[pathPts.length-1];
     const dx=x-last.x, dy=y-last.y;
     if (dx*dx+dy*dy > 9) { pathPts.push({x,y}); drawEditor(); }
   }
 });
-
-/* --- COMPLETE: finalize rect or polygon on pointerup --- */
-function polyArea(pts){ // image-space pts
+function polyArea(pts){
   let a=0; for(let i=0,j=pts.length-1;i<pts.length;j=i++) a += (pts[j].x+pts[i].x)*(pts[j].y-pts[i].y);
   return Math.abs(a/2);
 }
-
 mCanvas.addEventListener('pointerup', ()=>{
   if (drawMode==='rect'){
     if (!lastRect || lastRect.w<8 || lastRect.h<8){ startPt=null; lastRect=null; drawEditor(); return; }
     const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
-    masksTmp.push({
-      type:'rect',
+    masksTmp.push({ type:'rect',
       x: Math.round(lastRect.x*sc),
       y: Math.round(lastRect.y*sc),
       w: Math.round(lastRect.w*sc),
@@ -503,21 +503,15 @@ mCanvas.addEventListener('pointerup', ()=>{
     startPt=null; lastRect=null; drawEditor();
   } else if (drawMode==='poly'){
     if (!pathPts || pathPts.length<3){ pathPts=null; drawEditor(); return; }
-    // close polygon (snap if near start)
     const first = pathPts[0], last = pathPts[pathPts.length-1];
-    const close = ((first.x-last.x)**2 + (first.y-last.y)**2) <= 144; // 12px
+    const close = ((first.x-last.x)**2 + (first.y-last.y)**2) <= 144;
     if (!close) pathPts.push({x:first.x, y:first.y});
-    // scale to image-space
     const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
     const pts = pathPts.map(p=>({x:Math.round(p.x*sc), y:Math.round(p.y*sc)}));
-    if (pts.length>=3 && polyArea(pts) >= 25){ // ignore tiny shapes
-      masksTmp.push({type:'poly', pts});
-    }
+    if (pts.length>=3 && polyArea(pts) >= 25){ masksTmp.push({type:'poly', pts}); }
     pathPts=null; drawEditor();
   }
 });
-
-/* editor buttons */
 $('#mUndo').onclick = ()=>{
   if (pathPts && pathPts.length){ pathPts.pop(); if (!pathPts.length) pathPts=null; drawEditor(); return; }
   masksTmp.pop(); drawEditor();
@@ -530,10 +524,8 @@ $('#mSave').onclick = async ()=>{
     cur.masks = masksTmp;
     await pdb.put(cur);
     closeEditor();
-    resetGallery(); // reflect changes
-  }catch(e){
-    alert('Save failed: '+e.message);
-  }
+    resetGallery();
+  }catch(e){ alert('Save failed: '+e.message); }
 };
 
 /* ====== Sync controls ====== */
@@ -544,7 +536,11 @@ $('#pullBtn').onclick = async ()=>{ await pullOnce(); resetGallery(); };
 $('#couchHost').addEventListener('input', e=>{ couch.host=e.target.value.trim(); localStorage.setItem('io.host', couch.host); if (live){ stopLive(); startLive(); } });
 $('#couchDb').addEventListener('input',   e=>{ couch.db  =e.target.value.trim(); localStorage.setItem('io.db',   couch.db);   if (live){ stopLive(); startLive(); } });
 
-async function destroyLocal(){ try{ await pdb.destroy(); }catch{} pdb = new PouchDB(DB_LOCAL); }
+async function destroyLocal(){
+  try{ await pdb.destroy(); }catch{}
+  pdb = new PouchDB(DB_LOCAL);
+  attachChanges();            // re-attach changes feed after DB recreation
+}
 
 $('#restoreBtn').onclick = async ()=>{
   setPullMsg('Restoring…');
@@ -558,7 +554,6 @@ $('#restoreBtn').onclick = async ()=>{
   }
 };
 $('#clearLocalBtn').onclick = async ()=>{ await destroyLocal(); resetGallery(); setPullMsg('Local cleared. Now “Pull & Restore All”.'); };
-
 </script>
 </body>
 </html>
