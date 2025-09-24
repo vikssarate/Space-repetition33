@@ -42,7 +42,7 @@ small.muted{color:var(--muted)}
 /* masks (opaque dark blue) */
 .mask{
   position:absolute;border-radius:8px;
-  background:linear-gradient(135deg,rgba(10,28,80,1),rgba(10,28,80,1)); /* fully opaque */
+  background:linear-gradient(135deg,rgba(10,28,80,1),rgba(10,28,80,1));
   border:2px solid #2840a0; cursor:pointer
 }
 .mask.revealed{background:transparent;border-color:transparent}
@@ -263,6 +263,63 @@ $('#tabGallery').onclick = ()=>{ show('gal'); if (!io) setupIO(); };
 $('#tabSync').onclick    = ()=>show('sync');
 $('#tabPull').onclick    = ()=>show('pull');
 
+/* ====== Robust image pipeline ====== */
+function dataURLtoBlob(dataURL){
+  const parts = dataURL.split(','), b64 = parts[1];
+  const bin = atob(b64); const len = bin.length; const u8 = new Uint8Array(len);
+  for (let i=0;i<len;i++) u8[i]=bin.charCodeAt(i);
+  const mime = (parts[0].match(/data:(.*?);/)||[])[1]||'application/octet-stream';
+  return new Blob([u8], {type:mime});
+}
+function canvasToBlobSafe(canvas, type='image/jpeg', quality=.78){
+  return new Promise(res=>{
+    if (canvas.toBlob){
+      canvas.toBlob(b=>{ res(b || dataURLtoBlob(canvas.toDataURL(type,quality))); }, type, quality);
+    } else {
+      res(dataURLtoBlob(canvas.toDataURL(type,quality)));
+    }
+  });
+}
+
+/* compress blob → {blob,w,h}; fall back to original on failure/unsupported types */
+async function compressToJPEG(blob, maxDim=1600, quality=.78){
+  try{
+    let bmp;
+    if ('createImageBitmap' in window){
+      bmp = await createImageBitmap(blob);
+      const sc = Math.min(1, maxDim/Math.max(bmp.width, bmp.height));
+      const w = Math.round(bmp.width*sc), h = Math.round(bmp.height*sc);
+      const c = document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx = c.getContext('2d'); ctx.drawImage(bmp,0,0,w,h);
+      const out = await canvasToBlobSafe(c,'image/jpeg',quality);
+      try{ bmp.close && bmp.close(); }catch{}
+      return {blob:out, w, h};
+    }else{
+      const url = URL.createObjectURL(blob);
+      const img = await new Promise((r,j)=>{ const i=new Image(); i.onload=()=>r(i); i.onerror=j; i.src=url; });
+      URL.revokeObjectURL(url);
+      const sc = Math.min(1, maxDim/Math.max(img.naturalWidth||img.width, img.naturalHeight||img.height));
+      const w = Math.round((img.naturalWidth||img.width)*sc), h = Math.round((img.naturalHeight||img.height)*sc);
+      const c = document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx = c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+      const out = await canvasToBlobSafe(c,'image/jpeg',quality);
+      return {blob:out, w, h};
+    }
+  }catch(e){
+    // fallback: keep original
+    // try to estimate dims (may be unknown for non-image types)
+    const url = URL.createObjectURL(blob);
+    try{
+      const img = await new Promise((r,j)=>{ const i=new Image(); i.onload=()=>r(i); i.onerror=j; i.src=url; });
+      URL.revokeObjectURL(url);
+      return {blob, w: img.naturalWidth||0, h: img.naturalHeight||0};
+    }catch{
+      URL.revokeObjectURL(url);
+      return {blob, w: 0, h: 0};
+    }
+  }
+}
+
 /* ====== Add images ====== */
 const addUrls = $('#addUrls'), addFiles = $('#addFiles'), addBtn = $('#addBtn'), addMsg = $('#addMsg');
 
@@ -270,25 +327,14 @@ async function blobFromURL(u){
   const res = await fetch(u, {mode:'cors'}); if(!res.ok) throw new Error('Fetch failed');
   return await res.blob();
 }
-function loadImageDims(blob){ return new Promise((res,rej)=>{ const url=URL.createObjectURL(blob); const img=new Image(); img.onload=()=>{res({w:img.naturalWidth,h:img.naturalHeight}); URL.revokeObjectURL(url);}; img.onerror=rej; img.src=url;});}
-async function compressToJPEG(blob, maxDim=1600, quality=.78){
-  const url = URL.createObjectURL(blob);
-  const img = await new Promise((r,j)=>{const i=new Image(); i.onload=()=>r(i); i.onerror=j; i.src=url;});
-  URL.revokeObjectURL(url);
-  const sc = Math.min(1, maxDim/Math.max(img.width,img.height));
-  const w = Math.round(img.width*sc), h = Math.round(img.height*sc);
-  const c = document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx = c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
-  return await new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',quality));
-}
-async function addImageBlob(blob){
-  const jpeg = await compressToJPEG(blob);
-  const {w,h} = await loadImageDims(jpeg);
+async function addImageBlob(originalBlob){
+  // Try to compress to jpeg; fallback to original (HEIC etc.)
+  const {blob:jpeg, w, h} = await compressToJPEG(originalBlob);
   const _id = `img:${Date.now().toString(36)}:${uuid()}`;
   const doc = {
     _id, kind:'image', createdAt:new Date().toISOString(),
     w, h, masks:[],
-    _attachments: { [ATT_NAME]: { content_type:'image/jpeg', data: jpeg } }
+    _attachments: { [ATT_NAME]: { content_type: (jpeg.type||'image/jpeg'), data: jpeg } }
   };
   await pdb.put(doc); kickSync();
   return _id;
@@ -298,12 +344,21 @@ addBtn.onclick = async ()=>{
     addBtn.disabled=true; addMsg.textContent='Adding…';
     const urls = (addUrls.value||'').split(',').map(x=>x.trim()).filter(Boolean);
     let n=0, bytes=0;
-    for(const u of urls){ const b=await blobFromURL(u); bytes+=b.size; await addImageBlob(b); n++; }
+
+    for(const u of urls){
+      try{ const b=await blobFromURL(u); bytes+=b.size; await addImageBlob(b); n++; }
+      catch(e){ console.warn('URL add failed',u,e); }
+    }
     for(const f of [...(addFiles.files||[])]){ bytes+=f.size; await addImageBlob(f); n++; }
-    addUrls.value=''; addFiles.value=''; addMsg.textContent=`Added ${n} image(s), ${fmtBytes(bytes)}.`;
+
+    addUrls.value=''; addFiles.value='';
+    addMsg.textContent=`Added ${n} image(s), ${fmtBytes(bytes)}.`;
     resetGallery();
-  }catch(e){ addMsg.textContent='Failed: '+e.message; }
-  finally{ addBtn.disabled=false; }
+  }catch(e){
+    addMsg.textContent='Failed: '+e.message;
+  }finally{
+    addBtn.disabled=false;
+  }
 };
 
 /* ====== Gallery (infinite scroll restricted to img:) ====== */
@@ -320,11 +375,7 @@ function resetGallery(){ paging=null; gallery.innerHTML=''; loadMore(); }
 async function loadMore(){
   const start = paging || (IMG_PREFIX + '\uffff');
   const r = await pdb.allDocs({
-    include_docs:true,
-    descending:true,
-    startkey:start,
-    endkey:IMG_PREFIX,
-    limit: CHUNK
+    include_docs:true, descending:true, startkey:start, endkey:IMG_PREFIX, limit: CHUNK
   });
   if (!r.rows.length) return;
   r.rows.forEach(row => { if (row.doc && row.id.startsWith(IMG_PREFIX)) renderCard(row.doc); });
@@ -358,7 +409,7 @@ function renderCard(doc){
     img.src = URL.createObjectURL(blob);
   });
 
-  // draw masks (rect + polygon)
+  // draw masks
   const drawMasks = ()=>{
     [...wrap.querySelectorAll('.mask')].forEach(n=>n.remove());
     const vw = img.clientWidth;
@@ -390,7 +441,7 @@ function renderCard(doc){
   };
   img.onload = drawMasks; window.addEventListener('resize', drawMasks);
 
-  // card gestures: long-press anywhere to reset reveals
+  // long-press anywhere to reset reveals
   let t0=null;
   pill.addEventListener('pointerdown',()=>{ t0=Date.now(); });
   pill.addEventListener('pointerup',()=>{ if (Date.now()-t0>450) { wrap.querySelectorAll('.mask').forEach(m=>m.classList.remove('revealed')); } });
@@ -523,7 +574,7 @@ mCanvas.addEventListener('pointerup', ()=>{
   } else if (drawMode==='poly'){
     if (!pathPts || pathPts.length<3){ pathPts=null; drawEditor(); return; }
     const first = pathPts[0], last = pathPts[pathPts.length-1];
-    const close = ((first.x-last.x)**2 + (first.y-last.y)**2) <= 144; // 12px snap-close
+    const close = ((first.x-last.x)**2 + (first.y-last.y)**2) <= 144;
     if (!close) pathPts.push({x:first.x, y:first.y});
     const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
     const pts = pathPts.map(p=>({x:Math.round(p.x*sc), y:Math.round(p.y*sc)}));
@@ -586,6 +637,14 @@ $('#clearLocalBtn').onclick = async ()=>{
   resetGallery();
   setPullMsg('Local cleared. Now “Pull & Restore All”.');
 };
+
+/* ====== Infinite scroll bootstrap ====== */
+let io=null;
+function setupIO(){
+  if (io) io.disconnect();
+  io = new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)) loadMore(); }, {root:null, rootMargin:'1200px 0', threshold:0});
+  io.observe(document.getElementById('sentinel'));
+}
 </script>
 </body>
 </html>
