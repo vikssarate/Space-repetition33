@@ -39,11 +39,11 @@ small.muted{color:var(--muted)}
 .imgWrap{position:relative;max-width:min(100%,640px);margin:0 auto}
 .imgWrap img{display:block;width:100%;height:auto;border-radius:16px;border:2px solid var(--line);background:#0a1226}
 
-/* masks (dark) */
+/* masks (opaque dark blue) */
 .mask{
   position:absolute;border-radius:8px;
-  background:linear-gradient(135deg,rgba(10,28,80,1),rgba(10,28,80,1));
-  border:2px solid #25304f; cursor:pointer
+  background:linear-gradient(135deg,rgba(10,28,80,1),rgba(10,28,80,1)); /* fully opaque */
+  border:2px solid #2840a0; cursor:pointer
 }
 .mask.revealed{background:transparent;border-color:transparent}
 .mask.poly{left:0;top:0;border-radius:0;width:100%;height:100%}
@@ -118,11 +118,11 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
       <label>DB<br><input id="couchDb" class="key" style="min-width:160px" value="record"></label>
     </div>
     <div class="row" style="margin-top:8px">
-      <button id="liveBtn" class="btn">Live Sync: Off</button>
+      <button id="liveBtn" class="btn">Live Sync: On</button>
       <button id="pushBtn" class="btn">Push ⬆️</button>
       <button id="pullBtn" class="btn">Pull ⬇️</button>
     </div>
-    <div id="syncStatus" class="status" style="margin-top:6px">Idle.</div>
+    <div id="syncStatus" class="status" style="margin-top:6px">Auto live sync running…</div>
   </section>
 
   <!-- Pull/Restore -->
@@ -170,10 +170,9 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
 const DB_LOCAL = 'io-occl';
 const ATT_NAME = 'img';
 const CHUNK = 12;
-const IMG_PREFIX = 'img:';           // <— keyspace for gallery
+const IMG_PREFIX = 'img:';  // keyspace for gallery
 
 const $ = s => document.querySelector(s);
-const esc = s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const toArr = v => v==null?[]:(Array.isArray(v)?v:[v]);
 const fmtBytes = n => n>1e6? (n/1e6).toFixed(1)+' MB' : n>1e3? (n/1e3).toFixed(1)+' kB' : n+' B';
 const uuid = () => Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
@@ -195,7 +194,7 @@ function rdb(){ return new PouchDB(remoteURL(), {skip_setup:true}); }
 function setSyncStatus(t){ $('#syncStatus').textContent = t; }
 function setPullMsg(t){ $('#pullMsg').textContent = t; }
 
-/* live replicator */
+/* ---- Live sync: auto start & auto restart ---- */
 function startLive(){
   if (live) return;
   setSyncStatus('Starting live sync…');
@@ -215,7 +214,11 @@ function stopLive(){
 async function pushOnce(){ setSyncStatus('Pushing…'); try{ await pdb.replicate.to(rdb()); setSyncStatus('Push complete.'); }catch{ setSyncStatus('Push failed.'); } }
 async function pullOnce(){ setSyncStatus('Pulling…'); try{ await pdb.replicate.from(rdb()); setSyncStatus('Pull complete.'); }catch{ setSyncStatus('Pull failed.'); } }
 
-/* change feed (re-attach safe) */
+/* Kick an immediate push after any local write */
+let kickT=null;
+function kickSync(){ clearTimeout(kickT); kickT=setTimeout(()=>{ pushOnce().catch(()=>{}); }, 150); }
+
+/* Change feed to refresh UI */
 function attachChanges(){
   try{ changesFeed && changesFeed.cancel(); }catch(e){}
   changesFeed = pdb.changes({ live:true, since:'now' })
@@ -223,6 +226,20 @@ function attachChanges(){
     .on('error', ()=>{});
 }
 attachChanges();
+
+/* Auto start live + initial pull on fresh devices */
+(async function bootSync(){
+  startLive();
+  try{
+    const info = await pdb.info();
+    if ((info.doc_count||0) === 0){
+      setSyncStatus('No local data → pulling from CouchDB…');
+      await pullOnce();
+      setSyncStatus('Initial pull complete.');
+      resetGallery();
+    }
+  }catch{}
+})();
 
 /* ====== Tabs ====== */
 const panels = {
@@ -273,7 +290,7 @@ async function addImageBlob(blob){
     w, h, masks:[],
     _attachments: { [ATT_NAME]: { content_type:'image/jpeg', data: jpeg } }
   };
-  await pdb.put(doc);
+  await pdb.put(doc); kickSync();
   return _id;
 }
 addBtn.onclick = async ()=>{
@@ -301,13 +318,13 @@ function setupIO(){
 function resetGallery(){ paging=null; gallery.innerHTML=''; loadMore(); }
 
 async function loadMore(){
-  // page only within the img: keyspace (descending)
   const start = paging || (IMG_PREFIX + '\uffff');
   const r = await pdb.allDocs({
     include_docs:true,
     descending:true,
     startkey:start,
-    endkey:IMG_PREFIX
+    endkey:IMG_PREFIX,
+    limit: CHUNK
   });
   if (!r.rows.length) return;
   r.rows.forEach(row => { if (row.doc && row.id.startsWith(IMG_PREFIX)) renderCard(row.doc); });
@@ -383,7 +400,7 @@ function renderCard(doc){
   dBtn.onclick = async ()=>{
     if (!confirm('Delete this image?')) return;
     const cur = await pdb.get(doc._id);
-    await pdb.remove(cur);
+    await pdb.remove(cur); kickSync();
     card.remove(); updateCount();
   };
 }
@@ -424,7 +441,7 @@ function fitCanvas(){
 
 function drawEditor(preview){
   mCtx.clearRect(0,0,mCanvas.width,mCanvas.height);
-  const fillCol   = 'rgba(10,28,80,1)';
+  const fillCol   = 'rgba(10,28,80,1)'; // opaque dark blue
   const strokeCol = '#2840a0';
   const scale = (mCanvas.width)/(editingDoc.w||mCanvas.width);
 
@@ -486,10 +503,12 @@ mCanvas.addEventListener('pointermove', (ev)=>{
     if (dx*dx+dy*dy > 9) { pathPts.push({x,y}); drawEditor(); }
   }
 });
+
 function polyArea(pts){
   let a=0; for(let i=0,j=pts.length-1;i<pts.length;j=i++) a += (pts[j].x+pts[i].x)*(pts[j].y-pts[i].y);
   return Math.abs(a/2);
 }
+
 mCanvas.addEventListener('pointerup', ()=>{
   if (drawMode==='rect'){
     if (!lastRect || lastRect.w<8 || lastRect.h<8){ startPt=null; lastRect=null; drawEditor(); return; }
@@ -504,7 +523,7 @@ mCanvas.addEventListener('pointerup', ()=>{
   } else if (drawMode==='poly'){
     if (!pathPts || pathPts.length<3){ pathPts=null; drawEditor(); return; }
     const first = pathPts[0], last = pathPts[pathPts.length-1];
-    const close = ((first.x-last.x)**2 + (first.y-last.y)**2) <= 144;
+    const close = ((first.x-last.x)**2 + (first.y-last.y)**2) <= 144; // 12px snap-close
     if (!close) pathPts.push({x:first.x, y:first.y});
     const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
     const pts = pathPts.map(p=>({x:Math.round(p.x*sc), y:Math.round(p.y*sc)}));
@@ -512,6 +531,8 @@ mCanvas.addEventListener('pointerup', ()=>{
     pathPts=null; drawEditor();
   }
 });
+
+/* editor buttons */
 $('#mUndo').onclick = ()=>{
   if (pathPts && pathPts.length){ pathPts.pop(); if (!pathPts.length) pathPts=null; drawEditor(); return; }
   masksTmp.pop(); drawEditor();
@@ -522,7 +543,7 @@ $('#mSave').onclick = async ()=>{
   try{
     const cur = await pdb.get(editingDoc._id);
     cur.masks = masksTmp;
-    await pdb.put(cur);
+    await pdb.put(cur); kickSync();
     closeEditor();
     resetGallery();
   }catch(e){ alert('Save failed: '+e.message); }
@@ -533,13 +554,20 @@ $('#liveBtn').onclick = ()=> live ? stopLive() : startLive();
 $('#pushBtn').onclick = ()=> pushOnce();
 $('#pullBtn').onclick = async ()=>{ await pullOnce(); resetGallery(); };
 
-$('#couchHost').addEventListener('input', e=>{ couch.host=e.target.value.trim(); localStorage.setItem('io.host', couch.host); if (live){ stopLive(); startLive(); } });
-$('#couchDb').addEventListener('input',   e=>{ couch.db  =e.target.value.trim(); localStorage.setItem('io.db',   couch.db);   if (live){ stopLive(); startLive(); } });
+$('#couchHost').addEventListener('input', e=>{
+  couch.host=e.target.value.trim(); localStorage.setItem('io.host', couch.host);
+  if (live){ stopLive(); startLive(); }
+});
+$('#couchDb').addEventListener('input', e=>{
+  couch.db=e.target.value.trim(); localStorage.setItem('io.db', couch.db);
+  if (live){ stopLive(); startLive(); }
+});
 
 async function destroyLocal(){
-  try{ await pdb.destroy(); }catch{}
+  try{ if (live) stopLive(); await pdb.destroy(); }catch{}
   pdb = new PouchDB(DB_LOCAL);
-  attachChanges();            // re-attach changes feed after DB recreation
+  attachChanges();
+  startLive();
 }
 
 $('#restoreBtn').onclick = async ()=>{
@@ -553,7 +581,11 @@ $('#restoreBtn').onclick = async ()=>{
     setPullMsg('Restore failed. Check host/DB/CORS.');
   }
 };
-$('#clearLocalBtn').onclick = async ()=>{ await destroyLocal(); resetGallery(); setPullMsg('Local cleared. Now “Pull & Restore All”.'); };
+$('#clearLocalBtn').onclick = async ()=>{
+  await destroyLocal();
+  resetGallery();
+  setPullMsg('Local cleared. Now “Pull & Restore All”.');
+};
 </script>
 </body>
 </html>
