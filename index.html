@@ -70,6 +70,14 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
 .sectionHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .sectionHead strong{font-size:12px;color:#cfd7ff}
 .sectionHead .mini{font-size:12px}
+
+/* ===== Image Occlusion (Apple Pencil / stylus) ===== */
+.occlStage{position:relative;max-width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0b1328;touch-action:none}
+.occlStage img{max-width:100%;display:block;user-select:none;-webkit-user-drag:none}
+.occlOverlay{position:absolute;left:0;top:0;width:100%;height:100%}
+.occlRect{fill:#0b0f22;fill-opacity:.86;stroke:#6ca8ff;stroke-width:2}
+.occlRect.revealed{fill-opacity:.06;stroke:#7bd88f}
+.occlRect.sel{stroke:#ffd166}
 </style>
 </head>
 <body>
@@ -190,10 +198,49 @@ hr{border:none;border-top:1px solid var(--line);margin:8px 0}
         </div>
         <!-- editors injected here -->
       </div>
+
+      <!-- ===== Image Occlusion (per card) ===== -->
+      <label>Occlusion Image URLs
+        <input id="fOcclUrls" type="text" placeholder="images/occ1.jpg, https://…">
+      </label>
+      <label>Attach Occlusion Images
+        <input id="fOcclFiles" type="file" accept="image/*" multiple>
+        <span class="small">Compressed & stored in IDB. Edit masks after adding.</span>
+      </label>
+      <div style="grid-column:1/-1">
+        <div class="small">Occlusion images</div>
+        <div id="chipsOccl" class="chips"></div>
+      </div>
+
     </div>
     <hr>
     <div id="modalErr" class="small" style="color:var(--bad)"></div>
     <div class="row"><button id="cancelBtn" class="btn">Cancel</button><button id="saveBtn" class="btn">Save</button></div>
+  </div>
+</div>
+
+<!-- Occlusion Editor Modal -->
+<div id="occlModal" class="modal" role="dialog" aria-modal="true">
+  <div class="modalCard">
+    <h2>Image Occlusion</h2>
+    <div class="row" style="justify-content:flex-start;gap:6px">
+      <button id="occlModeEdit" class="btn">Edit</button>
+      <button id="occlModeQuiz" class="btn">Quiz</button>
+      <button id="occlRevealAll" class="btn">Reveal All</button>
+      <button id="occlClear" class="btn">Clear Masks</button>
+    </div>
+
+    <div id="occlStage" class="occlStage" style="margin-top:8px">
+      <img id="occlImg" alt="">
+      <svg id="occlSvg" class="occlOverlay"></svg>
+    </div>
+
+    <div class="small" style="margin-top:6px">
+      Drag with mouse, finger, or Apple Pencil to draw rectangles. Tap rectangles in Quiz to reveal.
+    </div>
+    <div class="row">
+      <button id="occlClose" class="btn">Done</button>
+    </div>
   </div>
 </div>
 
@@ -228,12 +275,30 @@ const cancelBtn=document.getElementById('cancelBtn'), saveBtn=document.getElemen
 const sectionsWrap=document.getElementById('sectionsWrap'), addSectionBtn=document.getElementById('addSectionBtn');
 const saveTopBtn=document.getElementById('saveTopBtn');
 
+/* NEW: Occlusion UI refs */
+const fOcclUrls=document.getElementById('fOcclUrls');
+const fOcclFiles=document.getElementById('fOcclFiles');
+const chipsOccl=document.getElementById('chipsOccl');
+const occlModal=document.getElementById('occlModal');
+const occlImg=document.getElementById('occlImg');
+const occlSvg=document.getElementById('occlSvg');
+const occlStage=document.getElementById('occlStage');
+const occlModeEdit=document.getElementById('occlModeEdit');
+const occlModeQuiz=document.getElementById('occlModeQuiz');
+const occlRevealAll=document.getElementById('occlRevealAll');
+const occlClear=document.getElementById('occlClear');
+const occlClose=document.getElementById('occlClose');
+
 /* ===== Data ===== */
 let master=[], pool=[], io=null;
 const delSet=new Set(JSON.parse(localStorage.getItem(LSKD)||'[]'));
 const cardSeq=new WeakMap();
 let editMode=false, editingObj=null, editQImgs=[], editDImgs=[], editPImgs=[], editImgs=[], editAuds=[];
 let editSections=[]; // [{label,text,images:[]},...]
+
+/* NEW: Occlusion buffers */
+let editOccls=[];      // [{src:'idb:…'|URL, masks:[{x,y,w,h,label?,revealed:false}]}]
+let occlEditingIndex=-1;
 
 /* ===== IndexedDB ===== */
 function openDB(name){return new Promise((res,rej)=>{const r=indexedDB.open(name,1);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('media'))db.createObjectStore('media',{keyPath:'id'});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error||new Error('IDB open fail'));});}
@@ -258,6 +323,7 @@ function needsTall(k, d){
   if (k === 'question')  return toArr(d.qImages).length > 0;
   if (k === 'details')   return toArr(d.dImages).length > 0;
   if (k === 'place')     return toArr(d.pImages).length > 0;
+  if (k === 'occl')      return Array.isArray(d.occl) && d.occl.length > 0; /* NEW */
   if (k && k.startsWith('sec:')){
     const i = +k.split(':')[1];
     const s = (d.sections || [])[i] || {};
@@ -288,6 +354,11 @@ function normalize(x,asLocal){
     label: s.label ?? null,
     text:  s.text  ?? null,
     images: s.images ?? s.imgs ?? null
+  })) : null;
+
+  // NEW: occlusion array [{src, masks:[]}]
+  obj.occl = Array.isArray(x.occl) ? x.occl.map(o=>({
+    src: o.src, masks: Array.isArray(o.masks) ? o.masks.map(m=>({x:+m.x,y:+m.y,w:+m.w,h:+m.h,label:m.label??null})) : []
   })) : null;
 
   obj._id=makeId(obj);
@@ -335,6 +406,7 @@ function buildSeq(d){
     }
   });
 
+  if (Array.isArray(d.occl) && d.occl.length) seq.push('occl'); /* NEW */
   if (toArr(d.images).length) seq.push('image');
   if (toArr(d.audio).length)  seq.push('audio');
   return seq;
@@ -348,6 +420,7 @@ function renderCard(d){
   front.innerHTML=face(seq[0],d,seq);
   back.innerHTML=face(seq[1]??seq[0],d,seq);
   resolveMedia(front); resolveMedia(back);
+  setupOcclViews(front, d); setupOcclViews(back, d); /* NEW */
   pill.append(front,back);
 
   /* NEW: set initial height based on the starting face */
@@ -365,6 +438,7 @@ function renderCard(d){
     const n=(i+1)%s.length, f=s[n], backSide=n%2===1;
     (backSide?back:front).innerHTML=face(f,d,s);
     resolveMedia(backSide?back:front);
+    setupOcclViews(backSide?back:front, d); /* NEW */
 
     /* NEW: adjust height for the newly visible face */
     pill.classList.toggle('tall', needsTall(f, d));
@@ -387,6 +461,7 @@ function nextHint(d, seq, cur){
     if (token === 'place')    return (d.placeLabel   || 'place');
     if (token === 'image')    return 'image';
     if (token === 'audio')    return 'audio';
+    if (token === 'occl')     return 'occlusion'; /* NEW */
     if (token && token.startsWith('sec:')){
       const idx = +token.split(':')[1];
       const sec = (d.sections || [])[idx] || {};
@@ -469,11 +544,48 @@ function face(k,d,seq){
       nextHint(d,seq,k)
     );
   }
+  if(k==='occl'){ /* NEW: occlusion face (first occl image) */
+    const o=(d.occl||[])[0];
+    if(!o) return wrap('<div class="mediaNote">No occlusions</div>', nextHint(d,seq,'occl'));
+    const imgTag = (typeof o.src==='string' && o.src.startsWith('idb:'))
+      ? `<img class="mediaImg" data-idb="${o.src.slice(4)}" alt="occlusion">`
+      : `<img class="mediaImg" src="${o.src}" alt="occlusion">`;
+    return wrap(
+      `<div class="mediaBox occlView" style="position:relative">
+         ${imgTag}
+         <svg class="occlOverlay"></svg>
+       </div>
+       <div class="mediaNote">Tap rectangles to reveal</div>`,
+      nextHint(d,seq,'occl')
+    );
+  }
   if(k==='image'){
     return wrap(imgListHtml(d.images, d.question || d.dateStr || 'image') || `<div class="mediaNote">No image</div>`, nextHint(d,seq,'image'));
   }
   if(k==='audio'){
     return wrap(audHtml(d) || `<div class="mediaNote">No audio</div>`, nextHint(d,seq,'audio'));
+  }
+}
+
+/* NEW: draw occlusion overlays inside card faces */
+function setupOcclViews(root, d){
+  const first=(d.occl||[])[0]; if(!first) return;
+  for(const view of root.querySelectorAll('.occlView')){
+    const img=view.querySelector('img'); const svg=view.querySelector('svg');
+    const draw=()=>{
+      const W=img.clientWidth, H=img.clientHeight;
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.innerHTML='';
+      const masks=(first.masks||[]).map(m=>({ ...m, revealed:false }));
+      masks.forEach(m=>{
+        const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        r.setAttribute('x', m.x*W); r.setAttribute('y', m.y*H);
+        r.setAttribute('width', m.w*W); r.setAttribute('height', m.h*H);
+        r.classList.add('occlRect');
+        r.addEventListener('click', ()=>{ m.revealed=!m.revealed; r.classList.toggle('revealed',m.revealed); });
+        svg.appendChild(r);
+      });
+    };
+    if(img.complete && img.naturalWidth) draw(); else img.onload=draw;
   }
 }
 
@@ -484,7 +596,7 @@ async function delCard(d){
     const adds=readLocalAdds();
     const ix=adds.findIndex(x=>x._uid===d._uid);
     if(ix>-1){
-      await cleanupRemoved(adds[ix],{qImages:[],dImages:[],pImages:[],images:[],audio:[],sections:[]});
+      await cleanupRemoved(adds[ix],{qImages:[],dImages:[],pImages:[],images:[],audio:[],sections:[], occl:[]}); /* NEW include occl */
       adds.splice(ix,1); saveLocalAdds(adds);
     }
   } else {
@@ -511,6 +623,10 @@ async function cleanupRemoved(prev,next){
   const prevS = (prev.sections||[]).flatMap(s=>toArr(s.images));
   const nextS = (next.sections||[]).flatMap(s=>toArr(s.images));
   await doClean(prevS,nextS);
+  // NEW: occlusion sources (src list)
+  const prevO = (prev.occl||[]).map(o=>o.src);
+  const nextO = (next.occl||[]).map(o=>o.src);
+  await doClean(prevO,nextO);
 }
 
 /* ===== Modal logic ===== */
@@ -527,18 +643,20 @@ function openModal(mode,obj=null){
     editQImgs=[...toArr(obj.qImages)]; editDImgs=[...toArr(obj.dImages)]; editPImgs=[...toArr(obj.pImages)];
     editImgs=[...toArr(obj.images)]; editAuds=[...toArr(obj.audio)];
     editSections=Array.isArray(obj.sections)?obj.sections.map(s=>({label:s.label||'',text:s.text||'',images:[...toArr(s.images)]})):[];
+    editOccls = Array.isArray(obj.occl)? obj.occl.map(o=>({src:o.src, masks:(o.masks||[]).map(m=>({x:+m.x,y:+m.y,w:+m.w,h:+m.h,label:m.label??null, revealed:false}))})) : []; /* NEW */
   }else{
     fQuestion.value=''; fDate.value=''; fPlace.value=''; fDetails.value=''; fDetailsLabel.value=''; fPlaceLabel.value='';
     editQImgs=[]; editDImgs=[]; editPImgs=[]; editImgs=[]; editAuds=[]; editSections=[];
+    editOccls=[]; /* NEW */
   }
   // clear file/url inputs
-  [fQImgUrls,fDImgUrls,fPImgUrls,fImgUrls,fAudUrls].forEach(i=>i.value='');
-  [fQImgFiles,fDImgFiles,fPImgFiles,fImgFiles,fAudFiles].forEach(i=>i.value='');
+  [fQImgUrls,fDImgUrls,fPImgUrls,fImgUrls,fAudUrls,fOcclUrls].forEach(i=>i.value='');
+  [fQImgFiles,fDImgFiles,fPImgFiles,fImgFiles,fAudFiles,fOcclFiles].forEach(i=>i.value='');
 
   renderChips(chipsQImg,editQImgs,'QIMG'); renderChips(chipsDImg,editDImgs,'DIMG'); renderChips(chipsPImg,editPImgs,'PIMG');
   renderChips(chipsImg,editImgs,'IMG'); renderChips(chipsAud,editAuds,'AUD');
-
   renderSectionsEditors();
+  renderOcclChips(); /* NEW */
   modal.style.display='flex';
   document.body.classList.add('modal-open');
   fQuestion.focus();
@@ -601,6 +719,39 @@ function renderSectionsEditors(){
   });
 }
 
+/* ===== Occlusion chips & adders ===== */
+function renderOcclChips(){
+  chipsOccl.innerHTML='';
+  if(!editOccls.length){ chipsOccl.innerHTML='<span class="small">— none —</span>'; return; }
+  editOccls.forEach((o,i)=>{
+    const s=document.createElement('span'); s.className='chip';
+    const label=(o.src||'').startsWith('idb:')
+      ? `OCCL(IDB) (${o.masks?.length||0})`
+      : `${(String(o.src).length>32?('…'+String(o.src).slice(-32)):String(o.src))} (${o.masks?.length||0})`;
+    s.innerHTML=`<span>${label}</span>
+      <button class="edit" title="Edit masks">✎</button>
+      <button class="del" title="Remove">×</button>`;
+    s.querySelector('.edit').onclick=()=>openOcclEditor(i);
+    s.querySelector('.del').onclick =()=>{ editOccls.splice(i,1); renderOcclChips(); };
+    chipsOccl.appendChild(s);
+  });
+}
+fOcclUrls?.addEventListener('change', ()=>{
+  const urls = splitUrls(fOcclUrls.value);
+  urls.forEach(u=> editOccls.push({src:u, masks:[]}));
+  fOcclUrls.value='';
+  renderOcclChips();
+});
+fOcclFiles?.addEventListener('change', async ()=>{
+  for(const file of [...(fOcclFiles.files||[])]) {
+    const blob=await compressImageToBlob(file);
+    const id=await idbPutBlob(DB_NAME,'occl',blob);
+    editOccls.push({src:'idb:'+id, masks:[]});
+  }
+  fOcclFiles.value='';
+  renderOcclChips();
+});
+
 /* Save */
 saveBtn.onclick=async()=>{
   try{
@@ -639,6 +790,10 @@ saveBtn.onclick=async()=>{
       if(label || text || imgs.length) sectionsOut.push({label:label||null,text:text||null,images:imgs});
     }
 
+    // NEW: also hoover up occlusion URLs typed but not added as chips yet
+    const urlOccls = splitUrls(fOcclUrls.value).map(u=>({src:u,masks:[]}));
+    const occlsOut = [...editOccls, ...urlOccls];
+
     const updated={
       question,
       dateTs:ts, dateStr:ds, year:y, month:m, day:d,
@@ -650,7 +805,8 @@ saveBtn.onclick=async()=>{
       pImages:[...editPImgs, ...urlPImgs, ...idbPImgs],
       images:[...editImgs, ...urlImgs, ...idbImgs],
       audio:[...editAuds, ...urlAuds, ...idbAuds],
-      sections: sectionsOut.length? sectionsOut : null
+      sections: sectionsOut.length? sectionsOut : null,
+      occl: occlsOut.length ? occlsOut : null /* NEW */
     };
     updated._id=makeId(updated);
 
@@ -708,6 +864,18 @@ exportBtn.onclick=async()=>{
     if(!one.images.length) delete one.images;
     if(!one.audio.length) delete one.audio;
     if(!one.sections.length) delete one.sections;
+
+    /* NEW: export occlusions (inline IDB images as data URLs) */
+    one.occl=[];
+    for(const o of (x.occl||[])){
+      let srcOut=o.src;
+      if(typeof srcOut==='string' && srcOut.startsWith('idb:')){
+        srcOut = await idbToDataURL(DB_NAME, srcOut.slice(4));
+      }
+      one.occl.push({src:srcOut, masks:o.masks||[]});
+    }
+    if(!one.occl.length) delete one.occl;
+
     out.push(one);
   }
   const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
@@ -731,6 +899,20 @@ importInp.onchange=async()=>{
       for(const s of n.sections){
         s.images = await fixMedia(s.images,'simg');
       }
+      // NEW: occlusions
+      n.occl = Array.isArray(n.occl)? n.occl : [];
+      const occlFixed=[];
+      for(const o of n.occl){
+        let src=o.src;
+        if(typeof src==='string' && src.startsWith('data:')){
+          const b=await (await fetch(src)).blob();
+          const id=await idbPutBlob(DB_NAME,'occl',b);
+          src='idb:'+id;
+        }
+        occlFixed.push({src, masks:(o.masks||[]).map(m=>({x:+m.x,y:+m.y,w:+m.w,h:+m.h,label:m.label??null}))});
+      }
+      n.occl=occlFixed;
+
       n._uid=genUid(); newOnes.push(n);
     }
     const adds=readLocalAdds(); adds.push(...newOnes); saveLocalAdds(adds);
@@ -742,6 +924,105 @@ importInp.onchange=async()=>{
 /* Rebuild */
 function rebuild(){ timeline.innerHTML=''; pool.length=0; refill(); loadMore(); }
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&modal.style.display==='flex'){ modal.style.display='none'; document.body.classList.remove('modal-open'); }});
+
+/* ===== Occlusion Editor (Pointer Events incl. Apple Pencil) ===== */
+let occlMode='edit', occlDrawing=null, curOccl=null;
+
+function openOcclEditor(index){
+  occlEditingIndex=index;
+  curOccl=editOccls[index];
+  if(!curOccl) return;
+
+  // show modal, keep main modal hidden under
+  modal.style.display='none';
+  occlModal.style.display='flex';
+  document.body.classList.add('modal-open');
+
+  setOcclImage(curOccl.src);
+  setOcclMode('edit');
+}
+function closeOcclEditor(){
+  occlModal.style.display='none';
+  modal.style.display='flex';
+  renderOcclChips();
+}
+
+function setOcclMode(m){ occlMode=m; redrawOccl(); }
+function setOcclImage(src){
+  const set = (blobUrlOrSrc)=>{ occlImg.onload=()=>redrawOccl(); occlImg.src=blobUrlOrSrc; };
+  if(typeof src==='string' && src.startsWith('idb:')){
+    idbGetBlob(DB_NAME, src.slice(4)).then(b=> set(URL.createObjectURL(b))).catch(()=> occlImg.removeAttribute('src'));
+  }else set(src);
+}
+function occlPt(ev){
+  const r=occlImg.getBoundingClientRect();
+  const x=(ev.clientX - r.left)/r.width;
+  const y=(ev.clientY - r.top )/r.height;
+  return {x:Math.max(0,Math.min(1,x)), y:Math.max(0,Math.min(1,y))};
+}
+function redrawOccl(){
+  if(!curOccl || !occlImg.src) { occlSvg.innerHTML=''; return; }
+  const W=occlImg.clientWidth, H=occlImg.clientHeight;
+  occlSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  occlSvg.innerHTML='';
+  (curOccl.masks||[]).forEach(m=>{
+    const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+    r.setAttribute('x', m.x*W); r.setAttribute('y', m.y*H);
+    r.setAttribute('width', m.w*W); r.setAttribute('height', m.h*H);
+    r.classList.add('occlRect'); if(m.revealed && occlMode==='quiz') r.classList.add('revealed');
+    r.addEventListener('pointerdown', e=>{
+      if(occlMode==='quiz'){ m.revealed=!m.revealed; r.classList.toggle('revealed',m.revealed); }
+    });
+    occlSvg.appendChild(r);
+  });
+}
+
+// Pointer drawing (mouse/touch/Apple Pencil)
+occlSvg.addEventListener('pointerdown', ev=>{
+  if(occlMode!=='edit' || !occlImg.src) return;
+  ev.preventDefault();
+  occlSvg.setPointerCapture(ev.pointerId);
+  const p=occlPt(ev), W=occlImg.clientWidth, H=occlImg.clientHeight;
+  const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  r.classList.add('occlRect','sel');
+  r.setAttribute('x', p.x*W); r.setAttribute('y', p.y*H);
+  r.setAttribute('width', 1); r.setAttribute('height', 1);
+  occlSvg.appendChild(r);
+  occlDrawing={x0:p.x,y0:p.y,rect:r};
+});
+occlSvg.addEventListener('pointermove', ev=>{
+  if(!occlDrawing) return;
+  const p=occlPt(ev), W=occlImg.clientWidth, H=occlImg.clientHeight;
+  const x=Math.min(occlDrawing.x0, p.x), y=Math.min(occlDrawing.y0, p.y);
+  const w=Math.abs(p.x-occlDrawing.x0), h=Math.abs(p.y-occlDrawing.y0);
+  occlDrawing.rect.setAttribute('x', x*W);
+  occlDrawing.rect.setAttribute('y', y*H);
+  occlDrawing.rect.setAttribute('width',  Math.max(2, w*W));
+  occlDrawing.rect.setAttribute('height', Math.max(2, h*H));
+});
+function finishDraw(){
+  if(!occlDrawing) return;
+  const W=occlImg.clientWidth, H=occlImg.clientHeight;
+  const x=+occlDrawing.rect.getAttribute('x')/W;
+  const y=+occlDrawing.rect.getAttribute('y')/H;
+  const w=+occlDrawing.rect.getAttribute('width')/W;
+  const h=+occlDrawing.rect.getAttribute('height')/H;
+  occlDrawing.rect.remove();
+  if(w>0.002 && h>0.002){
+    curOccl.masks=curOccl.masks||[];
+    curOccl.masks.push({x,y,w,h,label:null,revealed:false});
+  }
+  occlDrawing=null; redrawOccl();
+}
+occlSvg.addEventListener('pointerup', finishDraw);
+occlSvg.addEventListener('pointercancel', finishDraw);
+
+// Controls
+occlModeEdit.onclick=()=>setOcclMode('edit');
+occlModeQuiz.onclick=()=>{ (curOccl?.masks||[]).forEach(m=>m.revealed=false); setOcclMode('quiz'); };
+occlRevealAll.onclick=()=>{ (curOccl?.masks||[]).forEach(m=>m.revealed=true); redrawOccl(); };
+occlClear.onclick=()=>{ if(curOccl && confirm('Delete all masks?')){ curOccl.masks=[]; redrawOccl(); } };
+occlClose.onclick=()=>closeOcclEditor();
 </script>
 </body>
 </html>
