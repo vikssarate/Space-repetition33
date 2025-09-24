@@ -382,8 +382,8 @@ function fitCanvas(){
 function drawEditor(preview){
   // draw existing masks
   mCtx.clearRect(0,0,mCanvas.width,mCanvas.height);
-  mCtx.fillStyle='rgba(12,19,40,.82)';
-  mCtx.strokeStyle='#3a4976'; mCtx.lineWidth=2; mCtx.setLineDash([]);
+  mCtx.fillStyle='rgba(7,10,22,.92)';
+  mCtx.strokeStyle='#2b375c'; mCtx.lineWidth=2; mCtx.setLineDash([]);
   const scale = (mCanvas.width)/(editingDoc.w||mCanvas.width);
   masksTmp.forEach(m=>{
     mCtx.fillRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
