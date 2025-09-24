@@ -6,486 +6,469 @@
 <title>Image Occlusion</title>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <style>
-:root{--bg:#0f1220;--card:#181c2f;--ink:#eef1ff;--muted:#9aa3c7;--line:#2a3052;--accent:#6ca8ff;--ok:#7bd88f;--bad:#ff7575}
-*{box-sizing:border-box}
-html,body{height:100%}
+:root{
+  --bg:#0f1220; --card:#181c2f; --ink:#eef1ff; --muted:#9aa3c7; --line:#2a3052; --accent:#6ca8ff;
+  --ok:#7bd88f; --warn:#ffd166; --bad:#ff7575;
+}
+*{box-sizing:border-box} html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;-webkit-tap-highlight-color:transparent}
-header,footer{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+header,footer{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 h1{margin:0;font-size:18px}
-.badge{display:inline-flex;gap:6px;align-items:center;padding:4px 10px;border:1px solid var(--line);border-radius:9999px;color:var(--muted);font-size:12px}
-.btn{appearance:none;border:1px solid var(--accent);background:transparent;color:var(--ink);padding:8px 12px;border-radius:10px;font-weight:600;cursor:pointer}
+.wrap{max-width:1100px;margin:0 auto;padding:10px 16px 140px}
+.badge{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border:1px solid var(--line);border-radius:9999px;color:var(--muted);font-size:12px}
+.btn{appearance:none;border:1px solid var(--accent);background:#0b1430;color:var(--ink);padding:8px 12px;border-radius:12px;font-weight:700;cursor:pointer}
 .btn:active{transform:scale(.98)}
-.tabs{display:flex;gap:6px;flex-wrap:wrap}
-.tab{border:1px solid var(--line);background:#0b1328;color:#cfd7ff;padding:8px 12px;border-radius:9999px;cursor:pointer}
+.btn.warn{border-color:var(--warn)} .btn.bad{border-color:var(--bad)}
+.tabs{display:flex;gap:8px}
+.tab{padding:8px 12px;border:1px solid var(--line);border-radius:9999px;background:#0b1430;color:#dfe3ff;cursor:pointer}
 .tab.active{outline:2px solid var(--accent)}
-.wrap{max-width:980px;margin:0 auto;padding:10px 16px 60px}
 
-/* Add tab layout */
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.grid>label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
-input[type="text"]{background:#0c1328;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
-.small{font-size:12px;color:var(--muted)}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.chip{display:inline-flex;align-items:center;gap:6px;background:#0b1328;border:1px solid var(--line);border-radius:9999px;padding:4px 8px;font:600 12px/1 system-ui;color:#cfd7ff}
-.chip button{border:none;background:transparent;color:#ff9a9a;cursor:pointer;font-weight:800}
+/* panels */
+.card{border:1px solid var(--line);border-radius:16px;background:var(--card);padding:12px;margin:8px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input[type="text"],input[type="url"],textarea{background:#0c1328;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+input[type="file"]{color:#cbd3ff}
+small.muted{color:var(--muted)}
 
-/* Gallery */
-.timeline{position:relative;margin:8px auto}
-.gallery-card{position:relative;width:min(96%,780px);margin:20px auto 26px;padding:0;border:none;background:transparent}
-.btnRow{position:absolute;top:-26px;right:-2px;display:flex;gap:6px;z-index:2}
-.cardBtn{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:4px 8px;font-size:12px;cursor:pointer;color:#ddd}
-.cardBtn:hover{border-color:#9aa3c7}
-#sentinel{height:1px}
+/* capsule cards */
+.gallery{margin-top:8px}
+.gcard{position:relative;display:block;width:min(100%,680px);margin:22px auto 30px;border:none;background:transparent}
+.pill{position:relative;width:100%;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));
+      border:3px solid var(--accent);border-radius:9999px;box-shadow:0 12px 30px rgba(0,0,0,.28);padding:18px}
+.imgWrap{position:relative;max-width:min(100%,640px);margin:0 auto}
+.imgWrap img{display:block;width:100%;height:auto;border-radius:16px;border:2px solid var(--line);background:#0a1226}
 
-/* Media + occlusion */
-.mediaBox{width:100%;max-width:780px;margin:0 auto;position:relative}
-.mediaImg{display:block;margin:0 auto;border-radius:14px;border:2px solid var(--line);max-height:520px;width:auto;max-width:100%;object-fit:contain;background:#0b1328}
-.occlOverlay{position:absolute;inset:0}
-.occlRect{fill:#0b0f22;fill-opacity:.86;stroke:#6ca8ff;stroke-width:2}
-.occlRect.revealed{fill-opacity:.06;stroke:#7bd88f}
+/* masks */
+.mask{position:absolute;border-radius:8px;background:linear-gradient(135deg,rgba(12,19,40,.9),rgba(12,19,40,.94));
+      border:2px solid #32406a; cursor:pointer}
+.mask.revealed{background:transparent;border-color:transparent}
 
-/* Occlusion Editor Modal */
+/* card head */
+.head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.head .meta{font:600 12px/1.2 system-ui;color:var(--muted)}
+.tools{display:flex;gap:6px}
+.tools .btn{padding:6px 10px;font-weight:600}
+
+/* modal editor */
 body.modal-open{height:100%;overflow:hidden}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:10;padding:20px}
-.modalCard{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:980px;width:100%;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.4);max-height:calc(100vh - 40px);overflow:auto;-webkit-overflow-scrolling:touch}
-.modal h2{margin:0 0 8px 0;font-size:18px}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-.occlStage{position:relative;max-width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0b1328;touch-action:none;margin-top:10px}
-.occlStage img{max-width:100%;display:block;user-select:none;-webkit-user-drag:none}
-.modal .hint{font-size:12px;color:var(--muted);margin-top:6px}
-hr{border:none;border-top:1px solid var(--line);margin:10px 0}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:20;padding:18px}
+.mcard{background:var(--card);border:1px solid var(--line);border-radius:16px;width:min(96vw,980px);max-height:92vh;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,.45);padding:14px}
+.mtop{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:6px}
+.editor{position:relative;margin:8px auto;max-width:920px}
+.editor img{display:block;max-width:100%;height:auto;border:2px solid var(--line);border-radius:12px}
+.canvas{position:absolute;inset:0;touch-action:none}
+.legend{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:6px}
+legend samp{font-weight:800}
+hr{border:none;border-top:1px solid var(--line);margin:8px 0}
+
+/* sync panel */
+.key{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.status{color:#9aa3c7;font-size:12px}
+
+/* inf scroll */
+#sentinel{height:1px}
 </style>
 </head>
 <body>
 <header>
   <h1>Image Occlusion</h1>
   <div class="tabs">
-    <button id="tabAdd" class="tab active">Add</button>
-    <button id="tabGallery" class="tab">Gallery</button>
-  </div>
-  <div class="row">
-    <button id="exportBtn" class="btn">Export</button>
-    <label class="btn" style="cursor:pointer">Import
-      <input id="importInp" type="file" accept=".json,application/json" hidden>
-    </label>
+    <button class="tab active" id="tabAdd">Add</button>
+    <button class="tab" id="tabGallery">Gallery</button>
+    <button class="tab" id="tabSync">Sync</button>
+    <button class="tab" id="tabPull">Pull</button>
   </div>
 </header>
 
 <div class="wrap">
-  <!-- ADD TAB -->
-  <section id="addPane" class="card">
-    <div class="grid">
-      <label>Image URLs
-        <input id="urlInp" type="text" placeholder="https://… , https://…">
+  <!-- Add Panel -->
+  <section id="panelAdd" class="card">
+    <div class="row">
+      <label style="flex:1 1 460px">Image URLs
+        <input id="addUrls" type="text" placeholder="https://…, https://…">
       </label>
       <label>Attach Images
-        <input id="fileInp" type="file" accept="image/*" multiple>
-        <span class="small">Compressed & stored in IndexedDB.</span>
+        <input id="addFiles" type="file" accept="image/*" multiple>
+        <div><small class="muted">Compressed & stored as CouchDB attachments.</small></div>
       </label>
-    </div>
-    <div class="row" style="justify-content:flex-end;margin-top:8px">
       <button id="addBtn" class="btn">Add to Library</button>
     </div>
-    <hr>
-    <div class="small">Newly added (edit masks or remove):</div>
-    <div id="chips" class="chips"></div>
+    <div id="addMsg" class="status" style="margin-top:6px">Ready.</div>
   </section>
 
-  <!-- GALLERY TAB -->
-  <section id="galleryPane" class="card" style="display:none">
-    <div class="small badge">Tip: In Gallery, tap a mask to remove it. Use “Reset” to restore masks for that image.</div>
-    <div id="timeline" class="timeline"></div>
+  <!-- Gallery -->
+  <section id="panelGallery" class="card" style="display:none">
+    <div class="row" style="justify-content:space-between">
+      <div class="badge">Tap a mask to reveal / hide. Long-press anywhere to reset all.</div>
+      <div class="badge">Images: <span id="countBadge">0</span></div>
+    </div>
+    <div id="gallery" class="gallery"></div>
     <div id="sentinel"></div>
+  </section>
+
+  <!-- Sync -->
+  <section id="panelSync" class="card" style="display:none">
+    <div class="row">
+      <label>Host<br><input id="couchHost" class="key" style="min-width:280px" value="https://couch.techstudy.me"></label>
+      <label>DB<br><input id="couchDb" class="key" style="min-width:160px" value="record"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="liveBtn" class="btn">Live Sync: Off</button>
+      <button id="pushBtn" class="btn">Push ⬆️</button>
+      <button id="pullBtn" class="btn">Pull ⬇️</button>
+    </div>
+    <div id="syncStatus" class="status" style="margin-top:6px">Idle.</div>
+  </section>
+
+  <!-- Pull/Restore -->
+  <section id="panelPull" class="card" style="display:none">
+    <div class="badge">Use this after clearing browser data. It rebuilds the local database from CouchDB.</div>
+    <div class="row" style="margin-top:8px">
+      <button id="restoreBtn" class="btn">Pull & Restore All</button>
+      <button id="clearLocalBtn" class="btn warn">Clear Local Only</button>
+    </div>
+    <div id="pullMsg" class="status" style="margin-top:6px"></div>
   </section>
 </div>
 
-<footer>
-  <div class="badge">Data in localStorage • Images in IndexedDB • No server</div>
-</footer>
+<footer><div class="badge">Offline-first • CouchDB attachments • Apple Pencil ready ✏️</div></footer>
 
-<!-- Occlusion Editor Modal -->
-<div id="occlModal" class="modal" role="dialog" aria-modal="true">
-  <div class="modalCard">
-    <h2>Occlusion Editor</h2>
-    <div class="row">
-      <button id="modeDraw" class="btn">Draw</button>
-      <button id="modeErase" class="btn">Erase</button>
-      <button id="clearAll" class="btn">Clear</button>
-      <button id="doneBtn" class="btn" style="margin-left:auto">Done</button>
+<!-- Editor Modal -->
+<div id="modal" class="modal" role="dialog" aria-modal="true">
+  <div class="mcard">
+    <div class="mtop">
+      <strong>Edit Masks</strong>
+      <div class="tools">
+        <button id="mUndo" class="btn">Undo</button>
+        <button id="mClear" class="btn warn">Clear Masks</button>
+        <button id="mSave" class="btn">Save</button>
+        <button id="mCancel" class="btn bad">Close</button>
+      </div>
     </div>
-    <div class="occlStage" id="occlStage">
-      <img id="occlImg" alt="">
-      <svg id="occlSvg" class="occlOverlay"></svg>
+    <div class="editor">
+      <img id="mImg" alt="for edit">
+      <canvas id="mCanvas" class="canvas"></canvas>
     </div>
-    <div class="hint">Draw rectangles with mouse, finger, or Apple Pencil. In Erase mode, tap a rectangle to delete it.</div>
+    <div class="legend">
+      <div>Draw rectangles with finger/Apple Pencil/mouse.</div>
+      <div>Tip: Hold <samp>⌘</samp>/<samp>Ctrl</samp> while dragging to snap to 8px grid.</div>
+    </div>
   </div>
 </div>
 
+<!-- PouchDB -->
+<script src="https://cdn.jsdelivr.net/npm/pouchdb@7.3.1/dist/pouchdb.min.js"></script>
 <script>
-/* ===================== Storage Keys ===================== */
-const LSK   = 'imgOcc.items.v1';      // items metadata
-const DB    = 'imgOcc.media.v1';      // IndexedDB store
+/* ====== Constants & helpers ====== */
+const DB_LOCAL = 'io-occl';
+const ATT_NAME = 'img';
+const CHUNK = 12;
 
-/* ===================== Elements ===================== */
-const tabAdd = document.getElementById('tabAdd');
-const tabGallery = document.getElementById('tabGallery');
-const addPane = document.getElementById('addPane');
-const galleryPane = document.getElementById('galleryPane');
+const $ = s => document.querySelector(s);
+const esc = s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const toArr = v => v==null?[]:(Array.isArray(v)?v:[v]);
+const fmtBytes = n => n>1e6? (n/1e6).toFixed(1)+' MB' : n>1e3? (n/1e3).toFixed(1)+' kB' : n+' B';
+const uuid = () => Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
 
-const urlInp = document.getElementById('urlInp');
-const fileInp = document.getElementById('fileInp');
-const addBtn = document.getElementById('addBtn');
-const chips = document.getElementById('chips');
+/* ====== Pouch/Couch ====== */
+let pdb = new PouchDB(DB_LOCAL);
+let live = null;
+const couch = {
+  host: localStorage.getItem('io.host') || 'https://couch.techstudy.me',
+  db:   localStorage.getItem('io.db')   || 'record'
+};
+$('#couchHost').value = couch.host;
+$('#couchDb').value   = couch.db;
 
-const exportBtn = document.getElementById('exportBtn');
-const importInp = document.getElementById('importInp');
+function remoteURL(){ return `${(couch.host||'').replace(/\/$/,'')}/${encodeURIComponent(couch.db||'')}`; }
+function rdb(){ return new PouchDB(remoteURL(), {skip_setup:true}); }
+function setSyncStatus(t){ $('#syncStatus').textContent = t; }
+function setPullMsg(t){ $('#pullMsg').textContent = t; }
 
-const timeline = document.getElementById('timeline');
-const sentinel = document.getElementById('sentinel');
-
-/* Occlusion Editor */
-const occlModal = document.getElementById('occlModal');
-const occlImg = document.getElementById('occlImg');
-const occlSvg = document.getElementById('occlSvg');
-const modeDraw = document.getElementById('modeDraw');
-const modeErase = document.getElementById('modeErase');
-const clearAll = document.getElementById('clearAll');
-const doneBtn = document.getElementById('doneBtn');
-const occlStage = document.getElementById('occlStage');
-
-/* ===================== State ===================== */
-let items = loadItems(); // [{id, created, src, masks:[{x,y,w,h,label?}]}]
-let pool = [];           // for infinite scroll
-let io = null;
-
-let editingIndex = -1;   // index into items
-let editMode = 'draw';   // 'draw' | 'erase'
-let drawing = null;      // {x0,y0,rect}
-
-/* ===================== IndexedDB helpers ===================== */
-function openDB(name){
-  return new Promise((res,rej)=>{
-    const r = indexedDB.open(name,1);
-    r.onupgradeneeded = ()=> {
-      const db = r.result;
-      if(!db.objectStoreNames.contains('media')) db.createObjectStore('media',{keyPath:'id'});
-    };
-    r.onsuccess = ()=> res(r.result);
-    r.onerror = ()=> rej(r.error || new Error('IDB open failed'));
-  });
+/* live replicator */
+function startLive(){
+  if (live) return;
+  setSyncStatus('Starting live sync…');
+  live = PouchDB.sync(pdb, rdb(), {live:true, retry:true})
+    .on('change', () => setSyncStatus('Live: change'))
+    .on('paused', e => setSyncStatus(e ? 'Live: paused (err)' : 'Live: paused'))
+    .on('active', () => setSyncStatus('Live: active'))
+    .on('error', e => setSyncStatus('Live error (check CORS/DB)'));
+  $('#liveBtn').textContent = 'Live Sync: On';
 }
-async function idbPutBlob(kind, blob){
-  const db = await openDB(DB);
-  const id = `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`;
-  await new Promise((res,rej)=>{
-    const tx=db.transaction('media','readwrite');
-    tx.oncomplete=()=>res();
-    tx.onerror=()=>rej(tx.error);
-    tx.objectStore('media').put({id, kind, mime: blob.type||'', created: Date.now(), blob});
-  });
-  db.close();
-  return 'idb:'+id;
+function stopLive(){
+  if (!live) return;
+  live.cancel(); live=null;
+  setSyncStatus('Live sync stopped.');
+  $('#liveBtn').textContent = 'Live Sync: Off';
 }
-async function idbGetBlob(uri){
-  const id = uri.slice(4);
-  const db = await openDB(DB);
-  const val = await new Promise((res,rej)=>{
-    const tx=db.transaction('media','readonly');
-    const g=tx.objectStore('media').get(id);
-    g.onsuccess=()=>res(g.result);
-    g.onerror=()=>rej(g.error);
-  });
-  db.close();
-  if(!val) throw new Error('not found');
-  return val.blob;
-}
-async function idbToDataURL(uri){
-  const b = await idbGetBlob(uri);
-  return await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(b); });
-}
+async function pushOnce(){ setSyncStatus('Pushing…'); try{ await pdb.replicate.to(rdb()); setSyncStatus('Push complete.'); }catch{ setSyncStatus('Push failed.'); } }
+async function pullOnce(){ setSyncStatus('Pulling…'); try{ await pdb.replicate.from(rdb()); setSyncStatus('Pull complete.'); }catch{ setSyncStatus('Pull failed.'); } }
 
-/* ===================== Utils ===================== */
-const toArr=v=>v==null?[]:(Array.isArray(v)?v:[v]);
-const splitUrls=s=>!s?[]:s.split(',').map(x=>x.trim()).filter(Boolean);
-function fmtLabel(u){
-  if(typeof u==='string' && u.startsWith('idb:')) return 'IDB image';
-  return String(u).length>42 ? '…'+String(u).slice(-42) : String(u);
+/* write helper that also triggers background save for live sync */
+async function putDoc(doc){ return await pdb.put(doc); }
+
+/* ====== Tabs ====== */
+const panels = {
+  add: $('#panelAdd'),
+  gal: $('#panelGallery'),
+  sync: $('#panelSync'),
+  pull: $('#panelPull')
+};
+function show(which){
+  $('#tabAdd').classList.toggle('active', which==='add');
+  $('#tabGallery').classList.toggle('active', which==='gal');
+  $('#tabSync').classList.toggle('active', which==='sync');
+  $('#tabPull').classList.toggle('active', which==='pull');
+  panels.add.style.display = which==='add' ? '' : 'none';
+  panels.gal.style.display = which==='gal' ? '' : 'none';
+  panels.sync.style.display= which==='sync'? '' : 'none';
+  panels.pull.style.display= which==='pull'? '' : 'none';
 }
-function clamp(n,min,max){ return Math.max(min, Math.min(max,n)); }
-function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
-async function compressImageToBlob(file, maxDim=1600, quality=.78){
-  const url = URL.createObjectURL(file);
+$('#tabAdd').onclick     = ()=>show('add');
+$('#tabGallery').onclick = ()=>{ show('gal'); if (!io) setupIO(); };
+$('#tabSync').onclick    = ()=>show('sync');
+$('#tabPull').onclick    = ()=>show('pull');
+
+/* ====== Add images ====== */
+const addUrls = $('#addUrls'), addFiles = $('#addFiles'), addBtn = $('#addBtn'), addMsg = $('#addMsg');
+
+async function blobFromURL(u){
+  const res = await fetch(u, {mode:'cors'}); if(!res.ok) throw new Error('Fetch failed');
+  return await res.blob();
+}
+function loadImageDims(blob){ return new Promise((res,rej)=>{ const url=URL.createObjectURL(blob); const img=new Image(); img.onload=()=>{res({w:img.naturalWidth,h:img.naturalHeight}); URL.revokeObjectURL(url);}; img.onerror=rej; img.src=url;});}
+async function compressToJPEG(blob, maxDim=1600, quality=.78){
+  const url = URL.createObjectURL(blob);
   const img = await new Promise((r,j)=>{const i=new Image(); i.onload=()=>r(i); i.onerror=j; i.src=url;});
   URL.revokeObjectURL(url);
-  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-  const w = Math.round(img.width*scale), h = Math.round(img.height*scale);
-  const c=document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx=c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
-  return await new Promise(res=> c.toBlob(b=>res(b), 'image/jpeg', quality));
+  const sc = Math.min(1, maxDim/Math.max(img.width,img.height));
+  const w = Math.round(img.width*sc), h = Math.round(img.height*sc);
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx = c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+  return await new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',quality));
 }
-
-/* ===================== Load/Save ===================== */
-function loadItems(){
+async function addImageBlob(blob, name='image.jpg'){
+  const jpeg = await compressToJPEG(blob);
+  const {w,h} = await loadImageDims(jpeg);
+  const _id = `img:${Date.now().toString(36)}:${uuid()}`;
+  const doc = {
+    _id, kind:'image', createdAt:new Date().toISOString(),
+    w, h, masks:[],
+    _attachments: { [ATT_NAME]: { content_type:'image/jpeg', data: jpeg } }
+  };
+  await putDoc(doc);
+  return _id;
+}
+addBtn.onclick = async ()=>{
   try{
-    const raw = JSON.parse(localStorage.getItem(LSK)||'[]');
-    return Array.isArray(raw) ? raw : [];
-  }catch{return [];}
-}
-function saveItems(){ localStorage.setItem(LSK, JSON.stringify(items)); }
-
-/* ===================== Tabs ===================== */
-function showTab(which){
-  if(which==='add'){
-    addPane.style.display='block';
-    galleryPane.style.display='none';
-    tabAdd.classList.add('active'); tabGallery.classList.remove('active');
-  }else{
-    addPane.style.display='none';
-    galleryPane.style.display='block';
-    tabGallery.classList.add('active'); tabAdd.classList.remove('active');
-    // rebuild pool for infinite scroll when opening gallery
-    rebuildGallery();
-  }
-}
-tabAdd.onclick=()=>showTab('add');
-tabGallery.onclick=()=>showTab('gallery');
-
-/* ===================== Add Tab ===================== */
-function renderChips(){
-  chips.innerHTML='';
-  if(!items.length){ chips.innerHTML='<span class="small">— empty —</span>'; return; }
-  // Show last 10 added
-  const last = [...items].sort((a,b)=>b.created-a.created).slice(0,10);
-  last.forEach((it, idx)=>{
-    const s=document.createElement('span'); s.className='chip';
-    s.innerHTML = `<span>${fmtLabel(it.src)} • ${it.masks?.length||0} mask(s)</span>
-      <button class="edit" title="Edit">✎</button>
-      <button class="del" title="Remove">×</button>`;
-    s.querySelector('.edit').onclick=()=>openEditor(items.findIndex(x=>x.id===it.id));
-    s.querySelector('.del').onclick =()=>{ const i=items.findIndex(x=>x.id===it.id); if(i>-1){ items.splice(i,1); saveItems(); renderChips(); } };
-    chips.appendChild(s);
-  });
-}
-renderChips();
-
-addBtn.onclick=async()=>{
-  // Add URLs
-  const urls = splitUrls(urlInp.value);
-  urls.forEach(u=> items.push({ id:genId(), created:Date.now(), src:u, masks:[] }));
-  urlInp.value='';
-
-  // Add files
-  for(const file of toArr(fileInp.files)){
-    const blob = await compressImageToBlob(file);
-    const uri = await idbPutBlob('img', blob);
-    items.push({ id:genId(), created:Date.now(), src:uri, masks:[] });
-  }
-  fileInp.value='';
-  saveItems();
-  renderChips();
+    addBtn.disabled=true; addMsg.textContent='Adding…';
+    const urls = (addUrls.value||'').split(',').map(x=>x.trim()).filter(Boolean);
+    let n=0, bytes=0;
+    for(const u of urls){ const b=await blobFromURL(u); bytes+=b.size; await addImageBlob(b); n++; }
+    for(const f of [...(addFiles.files||[])]){ bytes+=f.size; await addImageBlob(f); n++; }
+    addUrls.value=''; addFiles.value=''; addMsg.textContent=`Added ${n} image(s), ${fmtBytes(bytes)}.`;
+    // cause gallery to refresh
+    resetGallery();
+  }catch(e){ addMsg.textContent='Failed: '+e.message; }
+  finally{ addBtn.disabled=false; }
 };
 
-/* ===================== Gallery (infinite scroll) ===================== */
-function rebuildGallery(){
-  timeline.innerHTML=''; pool.length=0;
-  const sorted = [...items].sort((a,b)=>b.created - a.created);
-  pool.push(...sorted);
-  if(io) io.disconnect();
-  io = new IntersectionObserver(es=>{
-    if(es.some(e=>e.isIntersecting)) loadMore();
-  }, {root:null, rootMargin:'900px 0', threshold:0});
-  io.observe(sentinel);
-  loadMore();
+/* ====== Gallery (infinite scroll) ====== */
+const gallery = $('#gallery'), countBadge = $('#countBadge');
+let io=null, paging=null;
+
+function setupIO(){
+  if (io) io.disconnect();
+  io = new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)) loadMore(); }, {root:null, rootMargin:'1200px 0px', threshold:0});
+  io.observe($('#sentinel'));
 }
-const CHUNK=8;
-function loadMore(){
-  const n=Math.min(CHUNK, pool.length);
-  const slice=pool.splice(0,n);
-  slice.forEach(renderGalleryCard);
+function resetGallery(){ paging=null; gallery.innerHTML=''; loadMore(); }
+
+async function loadMore(){
+  const opts = paging ? {descending:true, limit:CHUNK, startkey:paging} : {descending:true, limit:CHUNK};
+  const r = await pdb.allDocs({...opts, include_docs:true, startkey: opts.startkey});
+  if (!r.rows.length) return;
+  r.rows.forEach(row => { if (row.doc && row.id.startsWith('img:')) renderCard(row.doc); });
+  paging = r.rows[r.rows.length-1].key;
+  updateCount();
 }
+async function updateCount(){ const info = await pdb.info(); countBadge.textContent = info.doc_count; }
 
-function renderGalleryCard(it){
-  const card=document.createElement('div'); card.className='gallery-card';
+/* build a capsule card for one doc */
+function renderCard(doc){
+  const card = document.createElement('div'); card.className='gcard';
+  const pill = document.createElement('div'); pill.className='pill';
+  const head = document.createElement('div'); head.className='head';
+  head.innerHTML = `<div class="meta">${new Date(doc.createdAt||Date.now()).toLocaleString()}</div>`;
+  const tools = document.createElement('div'); tools.className='tools';
+  const eBtn = document.createElement('button'); eBtn.className='btn'; eBtn.textContent='Edit';
+  const dBtn = document.createElement('button'); dBtn.className='btn bad'; dBtn.textContent='Delete';
+  tools.append(eBtn,dBtn); head.appendChild(tools);
 
-  /* Buttons */
-  const btnRow=document.createElement('div'); btnRow.className='btnRow';
-  const editBtn=document.createElement('button'); editBtn.className='cardBtn'; editBtn.textContent='✎ Edit'; editBtn.onclick=()=>openEditor(items.findIndex(x=>x.id===it.id));
-  const resetBtn=document.createElement('button'); resetBtn.className='cardBtn'; resetBtn.textContent='Reset';
-  const delBtn=document.createElement('button'); delBtn.className='cardBtn'; delBtn.textContent='🗑 Delete';
+  const wrap = document.createElement('div'); wrap.className='imgWrap';
+  const img = document.createElement('img'); img.alt='image';
+  wrap.appendChild(img);
 
-  btnRow.append(editBtn, resetBtn, delBtn);
+  pill.append(head, wrap); card.appendChild(pill); gallery.appendChild(card);
 
-  const box=document.createElement('div'); box.className='mediaBox';
-  const img=document.createElement('img'); img.className='mediaImg';
-  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); svg.classList.add('occlOverlay');
+  // load attachment
+  pdb.getAttachment(doc._id, ATT_NAME).then(blob=>{
+    img.src = URL.createObjectURL(blob);
+  });
 
-  box.append(img, svg);
-  card.append(btnRow, box);
-  timeline.appendChild(card);
-
-  const stateMasks = (it.masks||[]).map(m=>({...m, revealed:false}));
-
-  const draw=()=>{
-    const W=img.clientWidth, H=img.clientHeight;
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    svg.innerHTML='';
-    stateMasks.forEach(m=>{
-      const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
-      r.setAttribute('x', m.x*W); r.setAttribute('y', m.y*H);
-      r.setAttribute('width', m.w*W); r.setAttribute('height', m.h*H);
-      r.classList.add('occlRect'); if(m.revealed) r.classList.add('revealed');
-      r.addEventListener('click', ()=>{ // tap to remove mask
-        m.revealed = true; r.classList.add('revealed');
-      }, {passive:true});
-      svg.appendChild(r);
+  // draw masks
+  const drawMasks = ()=>{
+    [...wrap.querySelectorAll('.mask')].forEach(n=>n.remove());
+    const {clientWidth:vw} = img; if (!vw) { requestAnimationFrame(drawMasks); return; }
+    const scale = vw / (doc.w||vw);
+    toArr(doc.masks).forEach((m, idx)=>{
+      const d = document.createElement('div');
+      d.className = 'mask';
+      d.style.left = (m.x*scale) + 'px';
+      d.style.top  = (m.y*scale) + 'px';
+      d.style.width  = (m.w*scale) + 'px';
+      d.style.height = (m.h*scale) + 'px';
+      d.dataset.idx = idx;
+      d.addEventListener('pointerdown', (ev)=>{
+        ev.preventDefault(); d.classList.toggle('revealed');
+      });
+      wrap.appendChild(d);
     });
   };
+  img.onload = drawMasks; window.addEventListener('resize', drawMasks);
 
-  resetBtn.onclick=()=>{ stateMasks.forEach(m=>m.revealed=false); draw(); };
-  delBtn.onclick=()=>{ const ix=items.findIndex(x=>x.id===it.id); if(ix>-1){ items.splice(ix,1); saveItems(); card.remove(); } };
+  // card gestures: long-press anywhere to reset reveals
+  let t0=null;
+  pill.addEventListener('pointerdown',()=>{ t0=Date.now(); });
+  pill.addEventListener('pointerup',()=>{ if (Date.now()-t0>450) { wrap.querySelectorAll('.mask').forEach(m=>m.classList.remove('revealed')); } });
 
-  // Load the image
-  const setImg = (src)=>{
-    img.onload=draw;
-    img.src = src;
+  // edit/delete
+  eBtn.onclick = ()=> openEditor(doc);
+  dBtn.onclick = async ()=>{
+    if (!confirm('Delete this image?')) return;
+    const cur = await pdb.get(doc._id);
+    await pdb.remove(cur);
+    card.remove(); updateCount();
   };
-  if(typeof it.src==='string' && it.src.startsWith('idb:')){
-    idbGetBlob(it.src).then(b=> setImg(URL.createObjectURL(b))).catch(()=>{});
-  }else setImg(it.src);
-
-  // Redraw on resize for accurate scaling
-  const ro = new ResizeObserver(()=> draw());
-  ro.observe(img);
 }
 
-/* ===================== Editor ===================== */
-function openEditor(index){
-  editingIndex = index;
-  const it = items[index];
-  if(!it) return;
+/* ====== Modal mask editor (Apple Pencil / pen / touch / mouse) ====== */
+const modal = $('#modal'), mImg = $('#mImg'), mCanvas = $('#mCanvas');
+const mCtx = mCanvas.getContext('2d');
+let editingDoc=null, masksTmp=[], startPt=null, lastRect=null;
 
-  // Show modal
-  occlModal.style.display='flex';
-  document.body.classList.add('modal-open');
-
-  // Load image
-  const setImg=(src)=>{ occlImg.onload=()=>{ drawEditor(); }; occlImg.src=src; };
-  if(typeof it.src==='string' && it.src.startsWith('idb:')){
-    idbGetBlob(it.src).then(b=> setImg(URL.createObjectURL(b))).catch(()=>{});
-  }else setImg(it.src);
-
-  setMode('draw');
-}
-function closeEditor(){
-  occlModal.style.display='none';
-  document.body.classList.remove('modal-open');
-}
-
-function setMode(m){
-  editMode = m;
-  modeDraw.style.outline = (m==='draw') ? '2px solid var(--accent)' : 'none';
-  modeErase.style.outline = (m==='erase') ? '2px solid var(--accent)' : 'none';
-}
-modeDraw.onclick = ()=> setMode('draw');
-modeErase.onclick = ()=> setMode('erase');
-
-clearAll.onclick = ()=>{
-  const it = items[editingIndex]; if(!it) return;
-  if(confirm('Delete all masks for this image?')){ it.masks=[]; saveItems(); drawEditor(); }
-};
-doneBtn.onclick = ()=> closeEditor();
-
-function drawEditor(){
-  const it = items[editingIndex]; if(!it || !occlImg.src) { occlSvg.innerHTML=''; return; }
-  const W=occlImg.clientWidth, H=occlImg.clientHeight;
-  occlSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  occlSvg.innerHTML='';
-  (it.masks||[]).forEach((m, idx)=>{
-    const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
-    r.setAttribute('x', m.x*W); r.setAttribute('y', m.y*H);
-    r.setAttribute('width', m.w*W); r.setAttribute('height', m.h*H);
-    r.classList.add('occlRect');
-    if(editMode==='erase'){
-      r.addEventListener('pointerdown', e=>{
-        // remove this mask
-        it.masks.splice(idx,1);
-        saveItems(); drawEditor();
-      });
-    }
-    occlSvg.appendChild(r);
+function openEditor(doc){
+  editingDoc = doc;
+  masksTmp = JSON.parse(JSON.stringify(doc.masks||[]));
+  document.body.classList.add('modal-open'); modal.style.display='flex';
+  // load image
+  pdb.getAttachment(doc._id, ATT_NAME).then(blob=>{
+    mImg.src = URL.createObjectURL(blob);
   });
 }
-function editorPoint(ev){
-  const r=occlImg.getBoundingClientRect();
-  const x=(ev.clientX - r.left)/r.width;
-  const y=(ev.clientY - r.top )/r.height;
-  return {x:clamp(x,0,1), y:clamp(y,0,1)};
+function closeEditor(){ modal.style.display='none'; document.body.classList.remove('modal-open'); startPt=null; lastRect=null; }
+
+mImg.onload = ()=>{ fitCanvas(); drawEditor(); };
+window.addEventListener('resize', ()=>{ if(modal.style.display==='flex') { fitCanvas(); drawEditor(); } });
+
+function fitCanvas(){
+  const r = mImg.getBoundingClientRect();
+  const w = Math.round(r.width), h=Math.round(r.height);
+  mCanvas.width = w; mCanvas.height=h;
+  mCanvas.style.width = w+'px'; mCanvas.style.height=h+'px';
 }
 
-// Pointer events for drawing
-occlSvg.addEventListener('pointerdown', ev=>{
-  if(editMode!=='draw' || !occlImg.src) return;
-  ev.preventDefault();
-  occlSvg.setPointerCapture(ev.pointerId);
-  const p=editorPoint(ev), W=occlImg.clientWidth, H=occlImg.clientHeight;
-  const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
-  rect.classList.add('occlRect');
-  rect.setAttribute('x', p.x*W); rect.setAttribute('y', p.y*H);
-  rect.setAttribute('width', 1); rect.setAttribute('height', 1);
-  occlSvg.appendChild(rect);
-  drawing={x0:p.x, y0:p.y, rect};
-});
-occlSvg.addEventListener('pointermove', ev=>{
-  if(!drawing) return;
-  const p=editorPoint(ev), W=occlImg.clientWidth, H=occlImg.clientHeight;
-  const x=Math.min(drawing.x0, p.x), y=Math.min(drawing.y0, p.y);
-  const w=Math.abs(p.x-drawing.x0), h=Math.abs(p.y-drawing.y0);
-  drawing.rect.setAttribute('x', x*W);
-  drawing.rect.setAttribute('y', y*H);
-  drawing.rect.setAttribute('width',  Math.max(2, w*W));
-  drawing.rect.setAttribute('height', Math.max(2, h*H));
-});
-function finishDraw(){
-  if(!drawing) return;
-  const it = items[editingIndex]; if(!it) { drawing=null; return; }
-  const W=occlImg.clientWidth, H=occlImg.clientHeight;
-  const x=+drawing.rect.getAttribute('x')/W;
-  const y=+drawing.rect.getAttribute('y')/H;
-  const w=+drawing.rect.getAttribute('width')/W;
-  const h=+drawing.rect.getAttribute('height')/H;
-  drawing.rect.remove();
-  if(w>0.002 && h>0.002){
-    it.masks = it.masks || [];
-    it.masks.push({x,y,w,h});
-    saveItems();
-  }
-  drawing=null; drawEditor();
-}
-occlSvg.addEventListener('pointerup', finishDraw);
-occlSvg.addEventListener('pointercancel', finishDraw);
+function drawEditor(preview){
+  // draw existing masks
+  mCtx.clearRect(0,0,mCanvas.width,mCanvas.height);
+  mCtx.fillStyle='rgba(12,19,40,.82)';
+  mCtx.strokeStyle='#3a4976'; mCtx.lineWidth=2; mCtx.setLineDash([]);
+  const scale = (mCanvas.width)/(editingDoc.w||mCanvas.width);
+  masksTmp.forEach(m=>{
+    mCtx.fillRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
+    mCtx.strokeRect(m.x*scale, m.y*scale, m.w*scale, m.h*scale);
+  });
 
-/* ===================== Export / Import ===================== */
-exportBtn.onclick = async ()=>{
-  const out=[];
-  for(const it of items){
-    let srcOut = it.src;
-    if(typeof srcOut==='string' && srcOut.startsWith('idb:')){
-      try{ srcOut = await idbToDataURL(srcOut); }catch{}
-    }
-    out.push({src:srcOut, masks:it.masks||[], created:it.created||Date.now()});
+  if (preview){
+    mCtx.setLineDash([6,6]);
+    mCtx.strokeStyle='#7bd88f';
+    mCtx.strokeRect(preview.x, preview.y, preview.w, preview.h);
+    mCtx.setLineDash([]);
   }
-  const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='image-occlusion-export.json'; a.click(); URL.revokeObjectURL(url);
-};
-importInp.onchange = async ()=>{
-  const f = importInp.files?.[0]; if(!f) return;
+}
+
+function snap(v){ return (snapMode? Math.round(v/8)*8 : v); }
+let snapMode=false;
+
+mCanvas.addEventListener('pointerdown', (ev)=>{
+  mCanvas.setPointerCapture(ev.pointerId);
+  snapMode = ev.ctrlKey || ev.metaKey;
+  const rect = mCanvas.getBoundingClientRect();
+  startPt = {x: ev.clientX-rect.left, y: ev.clientY-rect.top};
+});
+mCanvas.addEventListener('pointermove', (ev)=>{
+  if (!startPt) return;
+  const rect = mCanvas.getBoundingClientRect();
+  const x = snap(ev.clientX-rect.left), y = snap(ev.clientY-rect.top);
+  const x0 = snap(startPt.x), y0 = snap(startPt.y);
+  const w = x - x0, h = y - y0;
+  lastRect = {x: Math.min(x0,x), y: Math.min(y0,y), w: Math.abs(w), h: Math.abs(h)};
+  drawEditor(lastRect);
+});
+mCanvas.addEventListener('pointerup', ()=>{
+  if (!lastRect || lastRect.w<8 || lastRect.h<8){ startPt=null; lastRect=null; drawEditor(); return; }
+  // push normalized rect
+  const sc = (editingDoc.w||mCanvas.width)/mCanvas.width;
+  masksTmp.push({
+    x: Math.round(lastRect.x*sc),
+    y: Math.round(lastRect.y*sc),
+    w: Math.round(lastRect.w*sc),
+    h: Math.round(lastRect.h*sc)
+  });
+  startPt=null; lastRect=null; drawEditor();
+});
+
+/* editor buttons */
+$('#mUndo').onclick = ()=>{ masksTmp.pop(); drawEditor(); };
+$('#mClear').onclick = ()=>{ if(confirm('Clear all masks?')) { masksTmp.length=0; drawEditor(); } };
+$('#mCancel').onclick= ()=> closeEditor();
+$('#mSave').onclick  = async ()=>{
   try{
-    const txt = await f.text(); const arr = JSON.parse(txt);
-    if(!Array.isArray(arr)) throw new Error('JSON must be an array');
-    for(const o of arr){
-      let src = o.src;
-      if(typeof src==='string' && src.startsWith('data:')){
-        const b = await (await fetch(src)).blob();
-        src = await idbPutBlob('
+    const cur = await pdb.get(editingDoc._id);
+    cur.masks = masksTmp;
+    await pdb.put(cur); // live sync will push instantly
+    closeEditor();
+    resetGallery(); // refresh rendering so masks show
+  }catch(e){ alert('Save failed: '+e.message); }
+};
+
+/* ====== Sync panel wiring ====== */
+$('#liveBtn').onclick = ()=> live ? stopLive() : startLive();
+$('#pushBtn').onclick = ()=> pushOnce();
+$('#pullBtn').onclick = ()=> pullOnce();
+
+$('#couchHost').addEventListener('input', ()=>{ couch.host=$('#couchHost').value.trim(); localStorage.setItem('io.host', couch.host); if(live) { stopLive(); startLive(); } });
+$('#couchDb').addEventListener('input',   ()=>{ couch.db=$('#couchDb').value.trim();     localStorage.setItem('io.db',   couch.db);   if(live) { stopLive(); startLive(); } });
+
+/* ====== Pull/restore ====== */
+$('#restoreBtn').onclick = async ()=>{
+  setPullMsg('Restoring… (pulling from remote)'); try{
+    await pullOnce(); setPullMsg('Pulled.'); resetGallery();
+  }catch{ setPullMsg('Restore failed.'); }
+};
+$('#clearLocalBtn').onclick = async ()=>{
+  await pdb.destroy(); pdb = new PouchDB(DB_LOCAL); setPullMsg('Local cleared. Use “Pull & Restore All”.'); resetGallery();
+};
+
+/* ====== Real-time UI updates when docs change ====== */
+pdb.changes({live:true, since:'now', include_docs:true})
+  .on('change', (c)=>{ if (c.doc && c.id.startsWith('img:')) { /* you could diff and patch; simplest: refresh counts */ updateCount(); } })
+  .on('error', ()=>{});
+
+/* ====== Boot ====== */
+show('add'); // start on Add
+resetGallery(); // draw if there are existing docs
+</script>
+</body>
+</html>
